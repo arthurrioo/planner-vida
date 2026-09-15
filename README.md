@@ -11,6 +11,11 @@ Este repositório segue os contratos canônicos aprovados:
 - `AFR_MIGRATION_PLAN.md`
 - `PHASE_1_IMPLEMENTATION_PLAN.md`
 
+## Status das milestones
+
+- Milestone 01: repository bootstrap concluida e congelada.
+- Milestone 02: environment and CI foundation adiciona separacao segura de ambientes, validacao repetivel e politica de fixtures sinteticas.
+
 ## Escopo da Milestone 01
 
 Incluído nesta entrega:
@@ -82,14 +87,17 @@ http://localhost:3000
 Rodar todos os checks principais:
 
 ```bash
+npm run validate:env:ci
+npm run check:secrets
 npm run lint
 npm run format:check
 npm run typecheck
+npm run typecheck:e2e
 npm run test
 npm run build
 ```
 
-Rodar E2E quando os browsers do Playwright estiverem disponíveis:
+Rodar E2E quando os browsers do Playwright estiverem disponiveis e quando milestones futuras criarem fluxos de aplicacao reais:
 
 ```bash
 npm run test:e2e
@@ -97,19 +105,41 @@ npm run test:e2e
 
 ## Ambientes
 
-`.env.example` documenta os nomes esperados para as próximas milestones. Os valores Supabase ainda não são usados pelo código da Milestone 01.
+`.env.example` documenta os nomes esperados para as proximas milestones. Os valores Supabase ainda nao sao usados pelo codigo da Milestone 02, mas ja sao validados como contrato operacional de ambiente.
 
 Segredos reais devem ficar apenas em `.env.local`, no ambiente seguro de CI/CD ou no ambiente aprovado de deploy. Nunca commitar credenciais.
+
+Documentacao operacional:
+
+- `docs/environment-strategy.md`
+- `docs/safe-fixture-policy.md`
+- `docs/ci-gates.md`
+
+Validar ambiente local:
+
+```bash
+npm run validate:env:local
+```
+
+Validar preview/producao dentro dos respectivos ambientes configurados:
+
+```bash
+npm run validate:env:preview
+npm run validate:env:production
+```
 
 ## CI
 
 O workflow em `.github/workflows/ci.yml` executa:
 
 - install com `npm ci`;
+- validacao do contrato de ambiente CI com valores sinteticos;
+- verificacao de hygiene contra secrets commitados;
 - lint;
 - format check;
 - typecheck;
+- E2E typecheck;
 - testes;
 - build.
 
-E2E está configurado no projeto, mas não é obrigatório no CI da Milestone 01 porque a matriz completa de fluxos críticos começa nas milestones seguintes.
+E2E browser execution permanece reservado para milestones futuras, quando existirem fluxos criticos reais de aplicacao.
