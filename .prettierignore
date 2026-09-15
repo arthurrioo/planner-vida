@@ -4,6 +4,8 @@ coverage
 playwright-report
 test-results
 package-lock.json
+.env.example
+supabase/**/*.sql
 AFR_EXISTING_SYSTEM_CONTEXT_PLANNER_VIDA.md
 AFR_MIGRATION_PLAN.md
 DATABASE_SCHEMA.md
