@@ -44,9 +44,10 @@ Branch: `milestone-04-auth-authorization-rls`.
 Commits:
 
 - `24db81b` - `feat: implement milestone 04 auth and rls`
-- Report commit to be added after this document is committed.
+- `a0a2e23` - `docs: add milestone 04 implementation report`
+- Final report PR URL update commit: latest branch commit after this file update.
 
-PR: Pending at time of report draft; to be updated after push/open.
+PR: https://github.com/arthurrioo/planner-vida/pull/3
 
 Baseline confirmation:
 
