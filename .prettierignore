@@ -1,0 +1,12 @@
+.next
+node_modules
+coverage
+playwright-report
+test-results
+package-lock.json
+AFR_EXISTING_SYSTEM_CONTEXT_PLANNER_VIDA.md
+AFR_MIGRATION_PLAN.md
+DATABASE_SCHEMA.md
+PHASE_1_IMPLEMENTATION_PLAN.md
+PLANNER_PHASE_1_ARCHITECTURE.md
+PLANNER_PHASE_1_SPEC.md
