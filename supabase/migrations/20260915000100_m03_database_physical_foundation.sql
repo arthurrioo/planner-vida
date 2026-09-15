@@ -166,7 +166,7 @@ create table public.transactions (
   transaction_type public.transaction_type not null,
   status public.transaction_status not null default 'draft',
   description text,
-  amount numeric(19,4) not null check (amount > 0),
+  amount numeric(19,4) not null check (status <> 'posted' or amount > 0),
   currency text not null default 'BRL' check (currency ~ '^[A-Z]{3}$'),
   transaction_date date not null,
   competence_date date not null,
@@ -760,7 +760,7 @@ create table public.annual_obligation_installments (
   user_id uuid not null references public.profiles(id) on delete cascade,
   annual_obligation_id uuid not null,
   installment_number integer not null check (installment_number > 0),
-  amount numeric(19,4) not null check (amount >= 0),
+  amount numeric(19,4) not null check (amount > 0),
   due_date date not null,
   status public.commitment_status not null default 'expected',
   financial_commitment_id uuid,
@@ -784,7 +784,6 @@ create table public.provisions (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   constraint provisions_cash_view_false check (affects_cash_view = false),
-  constraint provisions_no_real_simulation_origin check (true),
   constraint provisions_month_is_month check (date_trunc('month', provision_month)::date = provision_month),
   constraint provisions_obligation_month_uniq unique (annual_obligation_id, provision_month),
   constraint provisions_user_id_id_key unique (user_id, id)
@@ -970,9 +969,13 @@ create table public.admin_observability_metrics (
   is_anomaly boolean not null default false,
   source_job_run_id uuid references public.system_job_runs(id) on delete set null,
   created_at timestamptz not null default now(),
-  constraint admin_observability_no_user_column check (true),
   constraint admin_observability_window_range check (metric_window_end_at >= metric_window_start_at)
 );
+
+comment on table public.provisions is
+  'Economic accrual layer only. DATABASE_SCHEMA.md reserves origin_type=simulation away from non-hypothetical provisions; this table has no origin_type column in M03.';
+comment on table public.admin_observability_metrics is
+  'Aggregate operational metrics only. This table intentionally has no user_id and must not store merchant, account, card, email, transaction, or other individualized finance identifiers.';
 
 create table migration_ops.migration_batches (
   id uuid primary key default gen_random_uuid(),
@@ -1269,10 +1272,107 @@ begin
     execute format('create policy owned_rows_select on public.%I for select to authenticated using (user_id = auth.uid())', table_name);
     execute format('create policy owned_rows_insert on public.%I for insert to authenticated with check (user_id = auth.uid())', table_name);
     execute format('create policy owned_rows_update on public.%I for update to authenticated using (user_id = auth.uid()) with check (user_id = auth.uid())', table_name);
-    execute format('create policy owned_rows_delete on public.%I for delete to authenticated using (user_id = auth.uid())', table_name);
   end loop;
 end;
 $$;
+
+-- DELETE policies are intentionally explicit. DATABASE_SCHEMA.md allows normal
+-- owner access, but physical deletion must remain narrower than read/write:
+-- posted/auditable financial facts are corrected with status transitions,
+-- reversals, voiding, archiving, or backend-only audited maintenance.
+
+-- Class B: authenticated owner may hard-delete only objective draft/pre-effect
+-- rows whose enum state is defined in the frozen contract.
+create policy transactions_delete_draft_owner on public.transactions
+  for delete to authenticated
+  using (user_id = auth.uid() and status = 'draft');
+
+create policy invoice_payments_delete_draft_owner on public.invoice_payments
+  for delete to authenticated
+  using (user_id = auth.uid() and status = 'draft');
+
+create policy budgets_delete_draft_owner on public.budgets
+  for delete to authenticated
+  using (user_id = auth.uid() and status = 'draft');
+
+create policy annual_obligations_delete_draft_owner on public.annual_obligations
+  for delete to authenticated
+  using (user_id = auth.uid() and status = 'draft');
+
+-- Class C: owner hard-delete is allowed for configurable, operational, or
+-- hypothetical records where the frozen contract does not require historical
+-- financial retention. Existing FKs still prevent deleting referenced rows.
+create policy accounts_delete_owner on public.accounts
+  for delete to authenticated
+  using (user_id = auth.uid());
+
+create policy credit_cards_delete_owner on public.credit_cards
+  for delete to authenticated
+  using (user_id = auth.uid());
+
+create policy categories_delete_owner on public.categories
+  for delete to authenticated
+  using (user_id = auth.uid());
+
+create policy recurrence_rules_delete_owner on public.recurrence_rules
+  for delete to authenticated
+  using (user_id = auth.uid());
+
+create policy budget_lines_delete_owner on public.budget_lines
+  for delete to authenticated
+  using (user_id = auth.uid());
+
+create policy planning_items_delete_owner on public.planning_items
+  for delete to authenticated
+  using (user_id = auth.uid());
+
+create policy financial_goals_delete_owner on public.financial_goals
+  for delete to authenticated
+  using (user_id = auth.uid());
+
+create policy simulation_scenarios_delete_owner on public.simulation_scenarios
+  for delete to authenticated
+  using (user_id = auth.uid());
+
+create policy simulation_scenario_versions_delete_owner on public.simulation_scenario_versions
+  for delete to authenticated
+  using (user_id = auth.uid());
+
+create policy events_delete_owner on public.events
+  for delete to authenticated
+  using (user_id = auth.uid());
+
+create policy tasks_delete_owner on public.tasks
+  for delete to authenticated
+  using (user_id = auth.uid());
+
+create policy shopping_lists_delete_owner on public.shopping_lists
+  for delete to authenticated
+  using (user_id = auth.uid());
+
+create policy shopping_list_items_delete_owner on public.shopping_list_items
+  for delete to authenticated
+  using (user_id = auth.uid());
+
+create policy wishlist_items_delete_owner on public.wishlist_items
+  for delete to authenticated
+  using (user_id = auth.uid());
+
+create policy subscriptions_delete_owner on public.subscriptions
+  for delete to authenticated
+  using (user_id = auth.uid());
+
+create policy assets_delete_owner on public.assets
+  for delete to authenticated
+  using (user_id = auth.uid());
+
+create policy liabilities_delete_owner on public.liabilities
+  for delete to authenticated
+  using (user_id = auth.uid());
+
+create policy merchant_category_mappings_delete_owner on public.merchant_category_mappings
+  for delete to authenticated
+  using (user_id = auth.uid());
 
 create policy profiles_self_select on public.profiles for select to authenticated using (id = auth.uid());
 create policy profiles_self_insert on public.profiles for insert to authenticated with check (id = auth.uid());

@@ -7,7 +7,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select plan(18);
+select plan(35);
 
 select has_type('public', 'transaction_type', 'transaction_type enum exists');
 select has_type('public', 'invoice_status', 'invoice_status enum exists');
@@ -20,6 +20,22 @@ select col_type_is('public', 'transactions', 'amount', 'numeric', 'money uses nu
 select col_type_is('public', 'transactions', 'transaction_date', 'date', 'financial dates are date-only');
 select col_type_is('public', 'events', 'start_at', 'timestamp with time zone', 'timed events use timestamptz');
 select policies_are('public', 'economic_indicators', array['economic_indicators_authenticated_read']);
+select policies_are(
+  'public',
+  'transactions',
+  array['owned_rows_select', 'owned_rows_insert', 'owned_rows_update', 'transactions_delete_draft_owner']
+);
+select policies_are('public', 'transfers', array['owned_rows_select', 'owned_rows_insert', 'owned_rows_update']);
+select policies_are(
+  'public',
+  'accounts',
+  array['owned_rows_select', 'owned_rows_insert', 'owned_rows_update', 'accounts_delete_owner']
+);
+select policies_are(
+  'storage',
+  'objects',
+  array['invoice_imports_user_select', 'invoice_imports_user_insert', 'invoice_imports_user_delete']
+);
 
 select is(
   (select public from storage.buckets where id = 'invoice-imports'),
@@ -114,14 +130,125 @@ values
     'checking',
     0,
     '2026-01-01'
+  ),
+  (
+    '00000000-0000-4000-8000-000000000303',
+    '00000000-0000-4000-8000-000000000201',
+    'Synthetic Transfer Destination A',
+    'synthetic-transfer-destination-a',
+    'savings',
+    0,
+    '2026-01-01'
+  ),
+  (
+    '00000000-0000-4000-8000-000000000304',
+    '00000000-0000-4000-8000-000000000201',
+    'Synthetic Deletable Account A',
+    'synthetic-deletable-account-a',
+    'wallet',
+    0,
+    '2026-01-01'
+  );
+
+insert into public.transactions (
+  id,
+  user_id,
+  transaction_type,
+  status,
+  description,
+  amount,
+  transaction_date,
+  competence_date,
+  competence_month,
+  payment_method,
+  account_id
+)
+values
+  (
+    '00000000-0000-4000-8000-000000000401',
+    '00000000-0000-4000-8000-000000000201',
+    'expense',
+    'posted',
+    'Posted transaction protected from hard delete',
+    100,
+    '2026-01-10',
+    '2026-01-10',
+    '2026-01-01',
+    'cash',
+    '00000000-0000-4000-8000-000000000301'
+  ),
+  (
+    '00000000-0000-4000-8000-000000000403',
+    '00000000-0000-4000-8000-000000000202',
+    'expense',
+    'posted',
+    'User B protected row',
+    75,
+    '2026-01-11',
+    '2026-01-11',
+    '2026-01-01',
+    'cash',
+    '00000000-0000-4000-8000-000000000302'
+  );
+
+insert into public.transfers (
+  id,
+  user_id,
+  source_account_id,
+  destination_account_id,
+  amount,
+  transfer_date,
+  description
+)
+values (
+  '00000000-0000-4000-8000-000000000601',
+  '00000000-0000-4000-8000-000000000201',
+  '00000000-0000-4000-8000-000000000301',
+  '00000000-0000-4000-8000-000000000303',
+  10,
+  '2026-01-12',
+  'Class A transfer protected from hard delete'
+);
+
+insert into public.annual_obligations (
+  id,
+  user_id,
+  obligation_type,
+  title,
+  fiscal_year,
+  final_amount,
+  due_date,
+  status
+)
+values
+  (
+    '00000000-0000-4000-8000-000000000501',
+    '00000000-0000-4000-8000-000000000201',
+    'ipva',
+    'Draft obligation deletable before effect',
+    2026,
+    100,
+    '2026-03-01',
+    'draft'
+  ),
+  (
+    '00000000-0000-4000-8000-000000000502',
+    '00000000-0000-4000-8000-000000000201',
+    'iptu',
+    'Obligation for installment constraint checks',
+    2026,
+    120,
+    '2026-04-01',
+    'draft'
   );
 
 set local role authenticated;
 select set_config('request.jwt.claim.sub', '00000000-0000-4000-8000-000000000201', true);
+
 select results_eq(
   'select count(*)::integer from public.accounts',
-  array[1],
-  'authenticated user sees only own account'
+  array[3],
+  'authenticated user sees only own accounts'
 );
 
 prepare cross_user_insert as
@@ -143,10 +270,170 @@ prepare cross_user_insert as
   );
 select throws_ok('cross_user_insert', null, null, 'cross-user insert is rejected by RLS');
 
+update public.accounts
+set name = 'Cross User Update Attempt'
+where id = '00000000-0000-4000-8000-000000000302';
+select results_eq(
+  $$select name from public.accounts where id = '00000000-0000-4000-8000-000000000302'$$,
+  array[]::text[],
+  'cross-user update cannot reach another user row'
+);
+
+delete from public.accounts
+where id = '00000000-0000-4000-8000-000000000302';
+reset role;
+select results_eq(
+  $$select count(*)::integer from public.accounts where id = '00000000-0000-4000-8000-000000000302'$$,
+  array[1],
+  'cross-user delete does not remove another user row'
+);
+
+set local role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-4000-8000-000000000201', true);
+prepare ownership_hijack_update as
+  update public.accounts
+  set user_id = '00000000-0000-4000-8000-000000000202'
+  where id = '00000000-0000-4000-8000-000000000301';
+select throws_ok('ownership_hijack_update', null, null, 'owner cannot change user_id to seize ownership');
+
+prepare posted_zero_transaction as
+  insert into public.transactions (
+    user_id,
+    transaction_type,
+    status,
+    description,
+    amount,
+    transaction_date,
+    competence_date,
+    competence_month,
+    payment_method,
+    account_id
+  )
+  values (
+    '00000000-0000-4000-8000-000000000201',
+    'expense',
+    'posted',
+    'Posted zero amount must fail',
+    0,
+    '2026-01-13',
+    '2026-01-13',
+    '2026-01-01',
+    'cash',
+    '00000000-0000-4000-8000-000000000301'
+  );
+select throws_ok('posted_zero_transaction', null, null, 'posted transaction amount zero is rejected');
+
+prepare draft_zero_transaction as
+  insert into public.transactions (
+    id,
+    user_id,
+    transaction_type,
+    status,
+    amount,
+    transaction_date,
+    competence_date,
+    competence_month,
+    payment_method,
+    account_id
+  )
+  values (
+    '00000000-0000-4000-8000-000000000402',
+    '00000000-0000-4000-8000-000000000201',
+    'expense',
+    'draft',
+    0,
+    '2026-01-14',
+    '2026-01-14',
+    '2026-01-01',
+    'cash',
+    '00000000-0000-4000-8000-000000000301'
+  );
+select lives_ok('draft_zero_transaction', 'draft transaction amount zero is accepted by the physical contract');
+
+delete from public.transactions
+where id = '00000000-0000-4000-8000-000000000401';
+select results_eq(
+  $$select count(*)::integer from public.transactions where id = '00000000-0000-4000-8000-000000000401'$$,
+  array[1],
+  'owner cannot hard-delete posted transactions'
+);
+
+delete from public.transactions
+where id = '00000000-0000-4000-8000-000000000402';
+select results_eq(
+  $$select count(*)::integer from public.transactions where id = '00000000-0000-4000-8000-000000000402'$$,
+  array[0],
+  'owner can hard-delete own draft transaction'
+);
+
+delete from public.transfers
+where id = '00000000-0000-4000-8000-000000000601';
+select results_eq(
+  $$select count(*)::integer from public.transfers where id = '00000000-0000-4000-8000-000000000601'$$,
+  array[1],
+  'class A transfer hard-delete is blocked for owner'
+);
+
+delete from public.annual_obligations
+where id = '00000000-0000-4000-8000-000000000501';
+select results_eq(
+  $$select count(*)::integer from public.annual_obligations where id = '00000000-0000-4000-8000-000000000501'$$,
+  array[0],
+  'class B draft annual obligation hard-delete is allowed'
+);
+
+delete from public.accounts
+where id = '00000000-0000-4000-8000-000000000304';
+select results_eq(
+  $$select count(*)::integer from public.accounts where id = '00000000-0000-4000-8000-000000000304'$$,
+  array[0],
+  'class C unreferenced configurable account hard-delete is allowed'
+);
+
+prepare annual_installment_zero as
+  insert into public.annual_obligation_installments (
+    user_id,
+    annual_obligation_id,
+    installment_number,
+    amount,
+    due_date
+  )
+  values (
+    '00000000-0000-4000-8000-000000000201',
+    '00000000-0000-4000-8000-000000000502',
+    1,
+    0,
+    '2026-04-01'
+  );
+select throws_ok('annual_installment_zero', null, null, 'annual obligation installment zero is rejected');
+
+prepare annual_installment_positive as
+  insert into public.annual_obligation_installments (
+    user_id,
+    annual_obligation_id,
+    installment_number,
+    amount,
+    due_date
+  )
+  values (
+    '00000000-0000-4000-8000-000000000201',
+    '00000000-0000-4000-8000-000000000502',
+    1,
+    10,
+    '2026-04-01'
+  );
+select lives_ok('annual_installment_positive', 'positive annual obligation installment is accepted');
+
 select isnt_empty(
   'select * from public.economic_indicators',
   'authenticated user can read macro reference data'
 );
+
+select is_empty(
+  'select * from public.admin_observability_metrics',
+  'authenticated non-admin has no broad admin metrics read policy'
+);
+
 reset role;
 
 select finish();
