@@ -45,7 +45,8 @@ Commits:
 
 - `24db81b` - `feat: implement milestone 04 auth and rls`
 - `a0a2e23` - `docs: add milestone 04 implementation report`
-- Final report PR URL update commit: latest branch commit after this file update.
+- `db95f42` - `docs: add milestone 04 pull request link`
+- Final report validation wording commit: latest branch commit after this file update.
 
 PR: https://github.com/arthurrioo/planner-vida/pull/3
 
@@ -110,7 +111,7 @@ Baseline confirmation:
 - `npm run verify:schema:m03` - passed.
 - `npm run verify:runtime:m03:pg` - passed, 2 clean reset cycles.
 - `npm run verify:runtime:m04:auth` - passed, 2 clean reset cycles.
-- `git diff --check` - passed before commit; to be rerun before final delivery.
+- `git diff --check origin/main..HEAD` - passed before final delivery.
 
 ## 8. Runtime Environment and Limitations
 
