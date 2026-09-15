@@ -1,4 +1,5 @@
 export const protectedRoutePrefix = "/app";
+export const passwordResetPath = "/auth/reset";
 export const authRoutePrefixes = ["/login", "/signup", "/recover"] as const;
 
 export function getSafeNextPath(value: FormDataEntryValue | string | null) {
@@ -7,7 +8,8 @@ export function getSafeNextPath(value: FormDataEntryValue | string | null) {
   }
 
   return value.startsWith(`${protectedRoutePrefix}/`) ||
-    value === protectedRoutePrefix
+    value === protectedRoutePrefix ||
+    value === passwordResetPath
     ? value
     : protectedRoutePrefix;
 }

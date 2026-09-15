@@ -43,11 +43,20 @@ describe("authorization helpers", () => {
 });
 
 describe("auth route helpers", () => {
-  it("normalizes unsafe redirect targets to the protected shell", () => {
+  it("preserves explicitly allowed internal redirect targets", () => {
+    expect(getSafeNextPath("/auth/reset")).toBe("/auth/reset");
+    expect(getSafeNextPath("/app")).toBe("/app");
     expect(getSafeNextPath("/app/profile")).toBe("/app/profile");
-    expect(getSafeNextPath("https://example.invalid/app")).toBe("/app");
-    expect(getSafeNextPath("/admin")).toBe("/app");
     expect(getLoginPath("/app/profile")).toBe("/login?next=%2Fapp%2Fprofile");
+  });
+
+  it("normalizes unsafe redirect targets to the protected shell", () => {
+    expect(getSafeNextPath("http://evil.example/app")).toBe("/app");
+    expect(getSafeNextPath("https://evil.example/app")).toBe("/app");
+    expect(getSafeNextPath("//evil.example/app")).toBe("/app");
+    expect(getSafeNextPath("https%3A%2F%2Fevil.example%2Fapp")).toBe("/app");
+    expect(getSafeNextPath("%2F%2Fevil.example%2Fapp")).toBe("/app");
+    expect(getSafeNextPath("/admin")).toBe("/app");
   });
 
   it("detects protected routes", () => {
