@@ -15,6 +15,7 @@
     "validate:env:preview": "node scripts/validate-env.mjs preview",
     "validate:env:production": "node scripts/validate-env.mjs production",
     "validate:env:ci": "node scripts/validate-env.mjs ci",
+    "verify:schema:m03": "node scripts/verify-m03-schema.mjs",
     "check:secrets": "node scripts/check-secrets.mjs",
     "typecheck": "tsc --project tsconfig.json --noEmit",
     "test": "vitest run",
