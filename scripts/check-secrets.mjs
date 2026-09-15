@@ -32,13 +32,21 @@ const suspiciousPatterns = [
     pattern: /\bgh[pousr]_[A-Za-z0-9_]{20,}\b/,
   },
   {
+    label: "JWT",
+    pattern: /\beyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/,
+  },
+  {
+    label: "AWS Access Key ID",
+    pattern: /\bAKIA[A-Z0-9]{16}\b/,
+  },
+  {
     label: "private key block",
     pattern: /-----BEGIN [A-Z ]*PRIVATE KEY-----/,
   },
   {
     label: "non-empty server secret assignment",
     pattern:
-      /^(?!\s*#)\s*(?:[A-Z0-9_]*(?:SECRET|SERVICE_ROLE|PRIVATE_KEY|PASSWORD|TOKEN)[A-Z0-9_]*)\s*=\s*(?!\s*(?:$|#|<|your-|example|changeme))/im,
+      /^(?![^\S\r\n]*#)[^\S\r\n]*(?:[A-Z0-9_]*(?:SECRET|SERVICE_ROLE|PRIVATE_KEY|PASSWORD|TOKEN)[A-Z0-9_]*)[^\S\r\n]*=[^\S\r\n]*(?!$|#|<|your-|example|changeme)/im,
   },
 ];
 
