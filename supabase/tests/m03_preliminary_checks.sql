@@ -7,7 +7,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select plan(35);
+select plan(39);
 
 select has_type('public', 'transaction_type', 'transaction_type enum exists');
 select has_type('public', 'invoice_status', 'invoice_status enum exists');
@@ -296,34 +296,66 @@ prepare ownership_hijack_update as
   where id = '00000000-0000-4000-8000-000000000301';
 select throws_ok('ownership_hijack_update', null, null, 'owner cannot change user_id to seize ownership');
 
-prepare posted_zero_transaction as
-  insert into public.transactions (
-    user_id,
-    transaction_type,
-    status,
-    description,
-    amount,
-    transaction_date,
-    competence_date,
-    competence_month,
-    payment_method,
-    account_id
-  )
-  values (
-    '00000000-0000-4000-8000-000000000201',
-    'expense',
-    'posted',
-    'Posted zero amount must fail',
-    0,
-    '2026-01-13',
-    '2026-01-13',
-    '2026-01-01',
-    'cash',
-    '00000000-0000-4000-8000-000000000301'
-  );
-select throws_ok('posted_zero_transaction', null, null, 'posted transaction amount zero is rejected');
+create function pg_temp.assert_transaction_amount_rejected(
+  tx_status public.transaction_status,
+  tx_amount numeric,
+  tx_description text,
+  allowed_constraints text[]
+)
+returns void
+language plpgsql
+as $$
+declare
+  violated_constraint text;
+begin
+  begin
+    insert into public.transactions (
+      user_id,
+      transaction_type,
+      status,
+      description,
+      amount,
+      transaction_date,
+      competence_date,
+      competence_month,
+      payment_method,
+      account_id
+    )
+    values (
+      '00000000-0000-4000-8000-000000000201',
+      'expense',
+      tx_status,
+      tx_description,
+      tx_amount,
+      '2026-01-13',
+      '2026-01-13',
+      '2026-01-01',
+      'cash',
+      '00000000-0000-4000-8000-000000000301'
+    );
+  exception when check_violation then
+    get stacked diagnostics violated_constraint = constraint_name;
 
-prepare draft_zero_transaction as
+    if not violated_constraint = any (allowed_constraints) then
+      raise exception 'unexpected transaction amount constraint %, expected one of %',
+        violated_constraint,
+        allowed_constraints;
+    end if;
+
+    return;
+  end;
+
+  raise exception 'transaction amount %, status %, was not rejected', tx_amount, tx_status;
+end;
+$$;
+
+select lives_ok(
+  $$select pg_temp.assert_transaction_amount_rejected('draft'::public.transaction_status, -50, 'Draft negative amount must fail', array['transactions_amount_non_negative'])$$,
+  'draft transaction amount negative is rejected by non-negative invariant'
+);
+
+select lives_ok(
+  $$
   insert into public.transactions (
     id,
     user_id,
@@ -347,8 +379,82 @@ prepare draft_zero_transaction as
     '2026-01-01',
     'cash',
     '00000000-0000-4000-8000-000000000301'
-  );
-select lives_ok('draft_zero_transaction', 'draft transaction amount zero is accepted by the physical contract');
+  )
+  $$,
+  'draft transaction amount zero is accepted by the physical contract'
+);
+
+select lives_ok(
+  $$
+  insert into public.transactions (
+    id,
+    user_id,
+    transaction_type,
+    status,
+    amount,
+    transaction_date,
+    competence_date,
+    competence_month,
+    payment_method,
+    account_id
+  )
+  values (
+    '00000000-0000-4000-8000-000000000425',
+    '00000000-0000-4000-8000-000000000201',
+    'expense',
+    'draft',
+    50,
+    '2026-01-15',
+    '2026-01-15',
+    '2026-01-01',
+    'cash',
+    '00000000-0000-4000-8000-000000000301'
+  )
+  $$,
+  'draft transaction amount positive is accepted'
+);
+
+select lives_ok(
+  $$select pg_temp.assert_transaction_amount_rejected('posted'::public.transaction_status, -50, 'Posted negative amount must fail', array['transactions_amount_non_negative', 'transactions_posted_amount_positive'])$$,
+  'posted transaction amount negative is rejected by amount constraints'
+);
+
+select lives_ok(
+  $$select pg_temp.assert_transaction_amount_rejected('posted'::public.transaction_status, 0, 'Posted zero amount must fail', array['transactions_posted_amount_positive'])$$,
+  'posted transaction amount zero is rejected by posted-positive invariant'
+);
+
+select lives_ok(
+  $$
+  insert into public.transactions (
+    id,
+    user_id,
+    transaction_type,
+    status,
+    description,
+    amount,
+    transaction_date,
+    competence_date,
+    competence_month,
+    payment_method,
+    account_id
+  )
+  values (
+    '00000000-0000-4000-8000-000000000426',
+    '00000000-0000-4000-8000-000000000201',
+    'expense',
+    'posted',
+    'Posted positive amount must pass',
+    50,
+    '2026-01-16',
+    '2026-01-16',
+    '2026-01-01',
+    'cash',
+    '00000000-0000-4000-8000-000000000301'
+  )
+  $$,
+  'posted transaction amount positive is accepted'
+);
 
 delete from public.transactions
 where id = '00000000-0000-4000-8000-000000000401';

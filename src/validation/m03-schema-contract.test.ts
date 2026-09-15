@@ -78,12 +78,25 @@ execute format('create policy owned_rows_delete on public.%I for delete to authe
     const migrationSql = fs
       .readFileSync(migrationPath, "utf8")
       .replace(
-        "amount numeric(19,4) not null check (status <> 'posted' or amount > 0),",
-        "amount numeric(19,4) not null check (amount > 0),",
+        "constraint transactions_posted_amount_positive check (status <> 'posted' or amount > 0),",
+        "constraint transactions_posted_amount_positive check (amount > 0),",
       );
 
     await expect(runVerifier(migrationSql)).resolves.toContain(
       "transactions.amount must enforce > 0 specifically for posted transactions.",
+    );
+  });
+
+  it("rejects removing the global non-negative transaction amount invariant", async () => {
+    const migrationSql = fs
+      .readFileSync(migrationPath, "utf8")
+      .replace(
+        "constraint transactions_amount_non_negative check (amount >= 0),",
+        "constraint transactions_amount_non_negative check (status = 'posted' or amount >= 0),",
+      );
+
+    await expect(runVerifier(migrationSql)).resolves.toContain(
+      "transactions.amount must enforce the global non-negative money_decimal invariant.",
     );
   });
 });

@@ -157,6 +157,61 @@ begin
 end;
 $$;
 
+create function pg_temp.assert_transaction_amount_rejected(
+  tx_status public.transaction_status,
+  tx_amount numeric,
+  tx_description text,
+  allowed_constraints text[]
+)
+returns void
+language plpgsql
+as $$
+declare
+  violated_constraint text;
+begin
+  begin
+    insert into public.transactions (
+      user_id,
+      transaction_type,
+      status,
+      description,
+      amount,
+      transaction_date,
+      competence_date,
+      competence_month,
+      payment_method,
+      account_id
+    )
+    values (
+      '00000000-0000-4000-8000-000000000201',
+      'expense',
+      tx_status,
+      tx_description,
+      tx_amount,
+      '2026-01-13',
+      '2026-01-13',
+      '2026-01-01',
+      'cash',
+      '00000000-0000-4000-8000-000000000301'
+    );
+  exception when check_violation then
+    get stacked diagnostics violated_constraint = constraint_name;
+
+    if not violated_constraint = any (allowed_constraints) then
+      raise exception 'M03 runtime assertion failed: unexpected transaction amount constraint %, expected one of %',
+        violated_constraint,
+        allowed_constraints;
+    end if;
+
+    return;
+  end;
+
+  raise exception 'M03 runtime assertion failed: transaction amount %, status %, was not rejected',
+    tx_amount,
+    tx_status;
+end;
+$$;
+
 select pg_temp.assert_eq(
   'public table count',
   (select count(*) from information_schema.tables where table_schema = 'public' and table_type = 'BASE TABLE'),
@@ -446,39 +501,12 @@ begin
 end;
 $$;
 
-do $$
-begin
-  begin
-    insert into public.transactions (
-      user_id,
-      transaction_type,
-      status,
-      description,
-      amount,
-      transaction_date,
-      competence_date,
-      competence_month,
-      payment_method,
-      account_id
-    )
-    values (
-      '00000000-0000-4000-8000-000000000201',
-      'expense',
-      'posted',
-      'Posted zero amount must fail',
-      0,
-      '2026-01-13',
-      '2026-01-13',
-      '2026-01-01',
-      'cash',
-      '00000000-0000-4000-8000-000000000301'
-    );
-  exception when check_violation then
-    return;
-  end;
-  raise exception 'posted zero-amount transaction was not rejected';
-end;
-$$;
+select pg_temp.assert_transaction_amount_rejected(
+  'draft',
+  -50,
+  'Draft negative amount must fail',
+  array['transactions_amount_non_negative']
+);
 
 insert into public.transactions (
   id,
@@ -500,6 +528,72 @@ values (
   0,
   '2026-01-14',
   '2026-01-14',
+  '2026-01-01',
+  'cash',
+  '00000000-0000-4000-8000-000000000301'
+);
+
+insert into public.transactions (
+  id,
+  user_id,
+  transaction_type,
+  status,
+  amount,
+  transaction_date,
+  competence_date,
+  competence_month,
+  payment_method,
+  account_id
+)
+values (
+  '00000000-0000-4000-8000-000000000425',
+  '00000000-0000-4000-8000-000000000201',
+  'expense',
+  'draft',
+  50,
+  '2026-01-15',
+  '2026-01-15',
+  '2026-01-01',
+  'cash',
+  '00000000-0000-4000-8000-000000000301'
+);
+
+select pg_temp.assert_transaction_amount_rejected(
+  'posted',
+  -50,
+  'Posted negative amount must fail',
+  array['transactions_amount_non_negative', 'transactions_posted_amount_positive']
+);
+
+select pg_temp.assert_transaction_amount_rejected(
+  'posted',
+  0,
+  'Posted zero amount must fail',
+  array['transactions_posted_amount_positive']
+);
+
+insert into public.transactions (
+  id,
+  user_id,
+  transaction_type,
+  status,
+  description,
+  amount,
+  transaction_date,
+  competence_date,
+  competence_month,
+  payment_method,
+  account_id
+)
+values (
+  '00000000-0000-4000-8000-000000000426',
+  '00000000-0000-4000-8000-000000000201',
+  'expense',
+  'posted',
+  'Posted positive amount must pass',
+  50,
+  '2026-01-16',
+  '2026-01-16',
   '2026-01-01',
   'cash',
   '00000000-0000-4000-8000-000000000301'

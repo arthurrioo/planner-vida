@@ -1,6 +1,6 @@
-# Milestone 03 Review Remediation Report
+# Milestone 03 N1 Micro-Remediation Report
 
-Status: READY FOR INDEPENDENT MILESTONE 03 RE-REVIEW
+Status: READY FOR FOCUSED INDEPENDENT MILESTONE 03 RE-REVIEW
 
 ## Branch, PR, and Commit Context
 
@@ -8,8 +8,9 @@ Status: READY FOR INDEPENDENT MILESTONE 03 RE-REVIEW
 - Branch: `milestone-03-database-foundation`
 - PR: `#2 - Milestone 03 - Database Physical Foundation`
 - Original implementation commit retained in history: `f460a3e985a6c6be2aec29cf05122d30b933adaa`
-- Remediation commit: created after validation and push on the same branch/PR
-- Scope: remediation of Independent Review findings F1-F6 only
+- Remediation commit: `089c1fb168e055e33f9c90c37c8100b12e2f407d`
+- N1 micro-remediation commit: created after validation and push on the same branch/PR
+- Scope: micro-remediation of Independent Re-Review finding N1 only, after F1-F6 were independently confirmed resolved
 - No merge, squash, M04+ implementation, production deploy, production data, real PDF, or real secret was used
 
 ## Canonical M03 Definition
@@ -46,6 +47,7 @@ Frozen contract files and `Markdown Files/` were not changed.
 | F4 - annual obligation installment zero accepted      | RESOLVED | `annual_obligation_installments.amount` changed from `>= 0` to `> 0`. Runtime harness and preliminary checks prove zero is rejected and positive value is accepted.                                                                                                                                                     |
 | F5 - semantic `CHECK (true)` constraints              | RESOLVED | Removed `provisions_no_real_simulation_origin` and `admin_observability_no_user_column`. Replaced intent with SQL comments. Runtime introspection confirms `admin_observability_metrics` has no `user_id`.                                                                                                              |
 | F6 - static verifier missed F1                        | RESOLVED | Verifier now rejects blanket `owned_rows_delete`, dynamic `CREATE POLICY ... FOR DELETE`, authenticated DELETE policies on hard-delete denied tables, missing draft-only DELETE policies, missing class C explicit policies, relaxed F3/F4 constraints, and `CHECK (true)`. Unit tests cover these regression paths.    |
+| N1 - draft negative transaction amount accepted       | RESOLVED | `transactions.amount` now has explicit constraints for both frozen invariants: global `amount >= 0` and posted-only `status <> 'posted' OR amount > 0`. Preliminary SQL checks and PostgreSQL 17.11 runtime harness cover the required six-case amount matrix.                                                          |
 
 ## DELETE Policy Matrix
 
@@ -77,7 +79,9 @@ No table remained ambiguous after reviewing the frozen contract; no `CONTROL TOW
 
 ## Constraint Changes
 
-- `transactions.amount`: changed to `CHECK (status <> 'posted' OR amount > 0)`.
+- `transactions.amount`: changed from the single `CHECK (status <> 'posted' OR amount > 0)` to explicit named constraints:
+  - `transactions_amount_non_negative`: `CHECK (amount >= 0)`
+  - `transactions_posted_amount_positive`: `CHECK (status <> 'posted' OR amount > 0)`
 - `annual_obligation_installments.amount`: changed to `CHECK (amount > 0)`.
 - Removed no-op `CHECK (true)` constraints.
 - Added comments documenting structural invariants for `provisions` and `admin_observability_metrics`.
@@ -92,16 +96,16 @@ No table remained ambiguous after reviewing the frozen contract; no `CONTROL TOW
 - no authenticated DELETE policy for class A tables;
 - required draft-only DELETE policies for class B tables;
 - required explicit owner DELETE policies for class C tables;
-- `transactions` table block contains the posted-only positive amount rule;
+- `transactions` table block contains both the global non-negative money amount rule and the posted-only positive amount rule;
 - `annual_obligation_installments` table block rejects zero;
 - no semantic `CHECK (true)`;
 - comments exist for the two removed no-op constraints.
 
-`src/validation/m03-schema-contract.test.ts` now includes negative regression tests for blanket DELETE, missing transaction draft-only DELETE, relaxed annual installment amount, and relaxed transaction amount.
+`src/validation/m03-schema-contract.test.ts` now includes negative regression tests for blanket DELETE, missing transaction draft-only DELETE, relaxed annual installment amount, missing posted transaction amount positivity, and missing global non-negative transaction amount.
 
 ## Preliminary SQL Test Changes
 
-`supabase/tests/m03_preliminary_checks.sql` was expanded to 35 checks covering:
+`supabase/tests/m03_preliminary_checks.sql` was expanded to 39 checks covering:
 
 - schema, enum, index, type, RLS policy, private storage bucket, invalid enum, and seed uniqueness checks;
 - class A/B/C DELETE representatives;
@@ -109,7 +113,7 @@ No table remained ambiguous after reviewing the frozen contract; no `CONTROL TOW
 - draft transaction hard-delete allowed;
 - cross-user INSERT/UPDATE/DELETE blocked;
 - owner cannot update `user_id` to seize ownership;
-- posted zero transaction rejected and draft zero transaction accepted;
+- complete N1 transaction amount matrix: draft negative rejected, draft zero accepted, draft positive accepted, posted negative rejected, posted zero rejected, posted positive accepted;
 - annual obligation installment zero rejected and positive installment accepted;
 - storage object policies present;
 - macro read allowed;
@@ -154,8 +158,7 @@ Runtime adversarial checks passed:
 - owner can hard-delete representative class C unreferenced account;
 - user A cannot insert/update/delete user B rows;
 - owner cannot mutate `user_id` to user B;
-- posted zero transaction rejected;
-- draft zero transaction accepted;
+- N1 transaction amount matrix passed: draft negative rejected, draft zero accepted, draft positive accepted, posted negative rejected, posted zero rejected, posted positive accepted;
 - annual obligation installment zero rejected;
 - positive annual obligation installment accepted;
 - storage cross-user insert/read blocked by path policy in harness;
@@ -200,6 +203,6 @@ Results are recorded in the final delivery message for the remediation commit. N
 
 ## Final Assessment
 
-F1-F6 are resolved with targeted M03-only changes. The migration applies from an empty PostgreSQL 17.11 database in two clean reset cycles, the seed is idempotent, adversarial RLS/DELETE checks pass, and no Frozen contract or M04+ scope was modified.
+F1-F6 remain resolved and unchanged. N1 is resolved with a targeted M03-only constraint change. The migration applies from an empty PostgreSQL 17.11 database in two clean reset cycles, the seed is idempotent, adversarial RLS/DELETE checks pass, the N1 six-case amount matrix passes, and no Frozen contract or M04+ scope was modified.
 
-Final status: READY FOR INDEPENDENT MILESTONE 03 RE-REVIEW
+Final status: READY FOR FOCUSED INDEPENDENT MILESTONE 03 RE-REVIEW

@@ -538,9 +538,27 @@ export function verifyM03Schema({ migrationSql, seedSql }) {
     "transactions",
   );
 
+  if (!transactionsBlock?.includes("amount numeric(19,4) not null,")) {
+    fail(
+      "transactions.amount must remain numeric(19,4) and NOT NULL.",
+      failures,
+    );
+  }
+
   if (
     !transactionsBlock?.includes(
-      "amount numeric(19,4) not null check (status <> 'posted' or amount > 0)",
+      "constraint transactions_amount_non_negative check (amount >= 0)",
+    )
+  ) {
+    fail(
+      "transactions.amount must enforce the global non-negative money_decimal invariant.",
+      failures,
+    );
+  }
+
+  if (
+    !transactionsBlock?.includes(
+      "constraint transactions_posted_amount_positive check (status <> 'posted' or amount > 0)",
     )
   ) {
     fail(
