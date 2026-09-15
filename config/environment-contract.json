@@ -1,0 +1,101 @@
+{
+  "version": "m02-v1",
+  "variables": {
+    "NEXT_PUBLIC_APP_ENV": {
+      "description": "Public runtime label for the Planner Vida environment.",
+      "public": true,
+      "secret": false
+    },
+    "NEXT_PUBLIC_APP_URL": {
+      "description": "Public canonical URL for the current app environment.",
+      "public": true,
+      "secret": false
+    },
+    "NEXT_PUBLIC_SUPABASE_URL": {
+      "description": "Public Supabase project URL for the target environment.",
+      "public": true,
+      "secret": false
+    },
+    "NEXT_PUBLIC_SUPABASE_ANON_KEY": {
+      "description": "Public Supabase anon key for browser/client access.",
+      "public": true,
+      "secret": false
+    },
+    "SUPABASE_SERVICE_ROLE_KEY": {
+      "description": "Server-only Supabase service role key. Never expose to the browser.",
+      "public": false,
+      "secret": true
+    },
+    "APP_VERSION": {
+      "description": "Build, commit, or release identifier used for audit and troubleshooting.",
+      "public": false,
+      "secret": false
+    },
+    "VERCEL_ENV": {
+      "description": "Vercel environment name when running in Vercel.",
+      "public": false,
+      "secret": false
+    }
+  },
+  "environments": {
+    "local": {
+      "description": "Developer workstation using Supabase DEV and synthetic/resettable data.",
+      "required": [
+        "NEXT_PUBLIC_APP_ENV",
+        "NEXT_PUBLIC_APP_URL",
+        "NEXT_PUBLIC_SUPABASE_URL",
+        "NEXT_PUBLIC_SUPABASE_ANON_KEY",
+        "APP_VERSION"
+      ],
+      "optional": ["SUPABASE_SERVICE_ROLE_KEY"],
+      "expectedValues": {
+        "NEXT_PUBLIC_APP_ENV": ["local"]
+      }
+    },
+    "preview": {
+      "description": "Vercel preview or test deployment using Supabase DEV or an isolated test project.",
+      "required": [
+        "NEXT_PUBLIC_APP_ENV",
+        "NEXT_PUBLIC_APP_URL",
+        "NEXT_PUBLIC_SUPABASE_URL",
+        "NEXT_PUBLIC_SUPABASE_ANON_KEY",
+        "APP_VERSION",
+        "VERCEL_ENV"
+      ],
+      "optional": ["SUPABASE_SERVICE_ROLE_KEY"],
+      "expectedValues": {
+        "NEXT_PUBLIC_APP_ENV": ["preview", "test"],
+        "VERCEL_ENV": ["preview"]
+      }
+    },
+    "production": {
+      "description": "Vercel production deployment using Supabase PROD and approved production secrets.",
+      "required": [
+        "NEXT_PUBLIC_APP_ENV",
+        "NEXT_PUBLIC_APP_URL",
+        "NEXT_PUBLIC_SUPABASE_URL",
+        "NEXT_PUBLIC_SUPABASE_ANON_KEY",
+        "SUPABASE_SERVICE_ROLE_KEY",
+        "APP_VERSION",
+        "VERCEL_ENV"
+      ],
+      "optional": [],
+      "expectedValues": {
+        "NEXT_PUBLIC_APP_ENV": ["production"],
+        "VERCEL_ENV": ["production"]
+      }
+    },
+    "ci": {
+      "description": "Repository validation environment. Uses synthetic values only and does not require Supabase secrets.",
+      "required": ["NEXT_PUBLIC_APP_ENV", "NEXT_PUBLIC_APP_URL", "APP_VERSION"],
+      "optional": [
+        "NEXT_PUBLIC_SUPABASE_URL",
+        "NEXT_PUBLIC_SUPABASE_ANON_KEY",
+        "VERCEL_ENV"
+      ],
+      "expectedValues": {
+        "NEXT_PUBLIC_APP_ENV": ["test"]
+      }
+    }
+  }
+}

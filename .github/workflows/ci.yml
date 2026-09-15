@@ -10,6 +10,10 @@ jobs:
   validate:
     name: Validate
     runs-on: ubuntu-latest
+    env:
+      APP_VERSION: ci
+      NEXT_PUBLIC_APP_ENV: test
+      NEXT_PUBLIC_APP_URL: http://localhost:3000
 
     steps:
       - name: Checkout
@@ -23,6 +27,12 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Environment contract
+        run: npm run validate:env:ci
+
+      - name: Secret hygiene
+        run: npm run check:secrets
 
       - name: Lint
         run: npm run lint
