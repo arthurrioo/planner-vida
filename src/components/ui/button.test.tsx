@@ -18,4 +18,10 @@ describe("Button", () => {
       "button",
     );
   });
+
+  it("supports compact shell actions", () => {
+    render(<Button size="sm">Sair</Button>);
+
+    expect(screen.getByRole("button", { name: "Sair" })).toBeVisible();
+  });
 });

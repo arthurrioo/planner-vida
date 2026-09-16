@@ -1,23 +1,41 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-  --muted: #f4f4f5;
-  --muted-foreground: #52525b;
-  --border: #d4d4d8;
-  --primary: #155e75;
+  --background: #fbfaf7;
+  --foreground: #161616;
+  --surface: #ffffff;
+  --muted: #eeeeea;
+  --muted-foreground: #5f625d;
+  --border: #d9d6cc;
+  --primary: #0f766e;
   --primary-foreground: #ffffff;
+  --ring: #0f766e;
+  --danger: #b42318;
+  --danger-foreground: #ffffff;
+  --danger-muted: #fff0ed;
+  --success: #217a4d;
+  --success-muted: #edf8f1;
+  --warning: #946200;
+  --warning-muted: #fff6db;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
   --color-muted: var(--muted);
   --color-muted-foreground: var(--muted-foreground);
   --color-border: var(--border);
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
+  --color-ring: var(--ring);
+  --color-danger: var(--danger);
+  --color-danger-foreground: var(--danger-foreground);
+  --color-danger-muted: var(--danger-muted);
+  --color-success: var(--success);
+  --color-success-muted: var(--success-muted);
+  --color-warning: var(--warning);
+  --color-warning-muted: var(--warning-muted);
   --font-sans:
     Arial, Helvetica, ui-sans-serif, system-ui, -apple-system,
     BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -27,13 +45,22 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-    --muted: #18181b;
-    --muted-foreground: #a1a1aa;
-    --border: #27272a;
-    --primary: #22d3ee;
-    --primary-foreground: #083344;
+    --background: #11110f;
+    --foreground: #f4f1ea;
+    --surface: #191916;
+    --muted: #24241f;
+    --muted-foreground: #beb8ac;
+    --border: #3a372e;
+    --primary: #2dd4bf;
+    --primary-foreground: #062b27;
+    --ring: #5eead4;
+    --danger: #f97066;
+    --danger-foreground: #3b0a06;
+    --danger-muted: #351412;
+    --success: #6ce9a6;
+    --success-muted: #102b1d;
+    --warning: #fdb022;
+    --warning-muted: #332408;
   }
 }
 
@@ -41,4 +68,8 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
 }

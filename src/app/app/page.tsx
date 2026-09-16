@@ -1,60 +1,39 @@
-import Link from "next/link";
-import { signOutAction } from "@/app/auth/actions";
-import { getActorForUser, getAuthenticatedSession } from "@/lib/auth/session";
-
-export const dynamic = "force-dynamic";
+import { ModulePage } from "@/components/app/module-page";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { EmptyState } from "@/components/ui/empty-state";
+import { formatBRL, formatDateBR } from "@/lib/ui/formatters";
 
 export default async function AppHomePage() {
-  const { profile, user } = await getAuthenticatedSession("/app");
-  const actor = await getActorForUser(user);
-  const roleLabel = actor.roles.includes("admin") ? "Admin" : "User";
-
   return (
-    <main className="min-h-dvh px-6 py-8 sm:px-10 lg:px-12">
-      <section className="mx-auto grid w-full max-w-5xl gap-8">
-        <header className="border-border flex flex-wrap items-center justify-between gap-4 border-b pb-5">
-          <div>
-            <p className="text-muted-foreground text-sm font-medium">
-              Planner Vida
+    <ModulePage
+      description="Centro operacional mobile-first para o dia. Nesta M05, a tela estabelece o shell e os estados de montagem; conteudo financeiro real entra nos milestones funcionais."
+      eyebrow="Home"
+      title="Hoje"
+    >
+      <div className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
+        <Card>
+          <CardHeader>
+            <CardTitle>Resumo do dia</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <EmptyState
+              description={`Estados, listas e cards ja usam o padrao visual da M05. Exemplo de formatacao: ${formatDateBR("2026-09-15")} e ${formatBRL("1234.56")}.`}
+              title="Sem eventos sinteticos carregados"
+            />
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle>Pronto para proximos milestones</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-muted-foreground text-sm leading-6">
+              O conteudo desta area permanece sem regra financeira ate a entrada
+              dos modulos canonicos de financeiro, planner e calendario.
             </p>
-            <h1 className="text-foreground mt-2 text-3xl font-semibold">
-              {profile.display_name}
-            </h1>
-          </div>
-          <form action={signOutAction}>
-            <button
-              className="border-border rounded-md border px-4 py-2 text-sm font-semibold"
-              type="submit"
-            >
-              Sair
-            </button>
-          </form>
-        </header>
-
-        <div className="grid gap-4 sm:grid-cols-3">
-          <div className="border-border rounded-lg border p-4">
-            <p className="text-muted-foreground text-sm">Email</p>
-            <p className="mt-2 font-medium break-words">{profile.email}</p>
-          </div>
-          <div className="border-border rounded-lg border p-4">
-            <p className="text-muted-foreground text-sm">Perfil</p>
-            <p className="mt-2 font-medium">{roleLabel}</p>
-          </div>
-          <div className="border-border rounded-lg border p-4">
-            <p className="text-muted-foreground text-sm">Moeda</p>
-            <p className="mt-2 font-medium">{profile.default_currency}</p>
-          </div>
-        </div>
-
-        <nav className="border-border flex flex-wrap gap-3 border-t pt-5">
-          <Link
-            className="bg-primary text-primary-foreground rounded-md px-4 py-2 text-sm font-semibold"
-            href="/app/profile"
-          >
-            Perfil
-          </Link>
-        </nav>
-      </section>
-    </main>
+          </CardContent>
+        </Card>
+      </div>
+    </ModulePage>
   );
 }
