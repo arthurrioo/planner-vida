@@ -1,4 +1,5 @@
 import type React from "react";
+import { Children, cloneElement, isValidElement } from "react";
 
 import { cn } from "@/lib/utils";
 
@@ -8,6 +9,20 @@ type FieldProps = React.LabelHTMLAttributes<HTMLLabelElement> & {
   label: string;
 };
 
+type DescribedFieldChildProps = {
+  "aria-describedby"?: string;
+  "aria-invalid"?: boolean | "false" | "true";
+  id?: string;
+};
+
+function mergeDescribedBy(current: string | undefined, next: string) {
+  return Array.from(
+    new Set([current, next].filter(Boolean).join(" ").split(" ")),
+  )
+    .filter(Boolean)
+    .join(" ");
+}
+
 export function Field({
   children,
   className,
@@ -16,24 +31,44 @@ export function Field({
   label,
   ...props
 }: FieldProps) {
+  const { htmlFor, ...labelProps } = props;
   const describedBy = [
-    hint ? `${props.htmlFor}-hint` : undefined,
-    error ? `${props.htmlFor}-error` : undefined,
+    htmlFor && hint ? `${htmlFor}-hint` : undefined,
+    htmlFor && error ? `${htmlFor}-error` : undefined,
   ]
     .filter(Boolean)
     .join(" ");
+  const enhancedChildren = describedBy
+    ? Children.map(children, (child) => {
+        if (!isValidElement<DescribedFieldChildProps>(child)) {
+          return child;
+        }
+
+        const childProps: DescribedFieldChildProps = {
+          "aria-describedby": mergeDescribedBy(
+            child.props["aria-describedby"],
+            describedBy,
+          ),
+        };
+
+        if (error && child.props["aria-invalid"] === undefined) {
+          childProps["aria-invalid"] = true;
+        }
+
+        return cloneElement(child, childProps);
+      })
+    : children;
 
   return (
-    <label
-      className={cn("grid gap-2 text-sm font-medium", className)}
-      {...props}
-    >
-      <span>{label}</span>
-      {children}
+    <div className={cn("grid gap-2 text-sm font-medium", className)}>
+      <label htmlFor={htmlFor} {...labelProps}>
+        {label}
+      </label>
+      {enhancedChildren}
       {hint ? (
         <span
           className="text-muted-foreground text-xs leading-5"
-          id={`${props.htmlFor}-hint`}
+          id={htmlFor ? `${htmlFor}-hint` : undefined}
         >
           {hint}
         </span>
@@ -41,13 +76,12 @@ export function Field({
       {error ? (
         <span
           className="text-danger text-xs font-semibold"
-          id={`${props.htmlFor}-error`}
+          id={htmlFor ? `${htmlFor}-error` : undefined}
         >
           {error}
         </span>
       ) : null}
-      {describedBy ? <span className="sr-only">{describedBy}</span> : null}
-    </label>
+    </div>
   );
 }
 

@@ -11,11 +11,11 @@ test("anonymous users are routed to the login screen", async ({ page }) => {
 test("protected app shell rejects anonymous access", async ({ page }) => {
   await page.goto("/app/profile");
 
-  await expect(page).toHaveURL(/\/login\?next=%2Fapp/);
+  await expect(page).toHaveURL("/login?next=%2Fapp%2Fprofile");
   await expect(page.getByRole("heading", { name: "Entrar" })).toBeVisible();
 });
 
-test("phase 1 navigation routes are protected and resolve to login", async ({
+test("phase 1 navigation routes preserve exact protected deep links", async ({
   page,
 }) => {
   const routes = [
@@ -32,9 +32,40 @@ test("phase 1 navigation routes are protected and resolve to login", async ({
   for (const route of routes) {
     await page.goto(route);
 
-    await expect(page).toHaveURL(/\/login\?next=%2Fapp/);
+    await expect(page).toHaveURL(`/login?next=${encodeURIComponent(route)}`);
     await expect(page.getByRole("heading", { name: "Entrar" })).toBeVisible();
   }
+});
+
+test("direct refresh of protected deep links preserves exact next target", async ({
+  page,
+}) => {
+  const routes = ["/app", "/app/profile", "/app/financeiro"];
+
+  for (const route of routes) {
+    await page.goto(route);
+    await page.reload();
+
+    await expect(page).toHaveURL(`/login?next=${encodeURIComponent(route)}`);
+  }
+});
+
+test("mobile protected deep links preserve exact next target", async ({
+  page,
+}) => {
+  await page.setViewportSize({ height: 812, width: 375 });
+  await page.goto("/app/financeiro");
+
+  await expect(page).toHaveURL("/login?next=%2Fapp%2Ffinanceiro");
+});
+
+test("compact landscape protected deep links preserve exact next target", async ({
+  page,
+}) => {
+  await page.setViewportSize({ height: 390, width: 844 });
+  await page.goto("/app/profile");
+
+  await expect(page).toHaveURL("/login?next=%2Fapp%2Fprofile");
 });
 
 test("login surface supports keyboard navigation smoke", async ({ page }) => {

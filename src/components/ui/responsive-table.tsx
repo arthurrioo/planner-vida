@@ -21,12 +21,18 @@ export function ResponsiveTable<Row extends Record<string, React.ReactNode>>({
 }: ResponsiveTableProps<Row>) {
   return (
     <div>
-      <div className="border-border hidden overflow-hidden rounded-lg border md:block">
-        <table className="w-full border-collapse text-left text-sm">
+      <div
+        className="border-border hidden overflow-x-auto rounded-lg border md:block"
+        data-testid="responsive-table-scroll-region"
+      >
+        <table className="w-max min-w-full border-collapse text-left text-sm">
           <thead className="bg-muted text-muted-foreground text-xs tracking-wide uppercase">
             <tr>
               {columns.map((column) => (
-                <th className="px-4 py-3 font-semibold" key={column.key}>
+                <th
+                  className="px-4 py-3 font-semibold whitespace-nowrap"
+                  key={column.key}
+                >
                   {column.header}
                 </th>
               ))}
@@ -36,7 +42,10 @@ export function ResponsiveTable<Row extends Record<string, React.ReactNode>>({
             {rows.map((row) => (
               <tr key={getRowKey(row)}>
                 {columns.map((column) => (
-                  <td className="px-4 py-3 align-top" key={column.key}>
+                  <td
+                    className="max-w-80 px-4 py-3 align-top whitespace-nowrap"
+                    key={column.key}
+                  >
                     {column.render ? column.render(row) : row[column.key]}
                   </td>
                 ))}

@@ -58,7 +58,7 @@ export function AppShell({
           </header>
 
           <main
-            className="w-full flex-1 px-4 pt-5 pb-28 sm:px-6 md:pb-8 lg:px-8"
+            className="w-full flex-1 px-4 pt-5 pb-[calc(10rem+env(safe-area-inset-bottom))] sm:px-6 md:pb-8 lg:px-8"
             id="conteudo-principal"
             tabIndex={-1}
           >
