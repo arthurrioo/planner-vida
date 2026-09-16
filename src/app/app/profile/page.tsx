@@ -1,6 +1,13 @@
 import { updateProfileAction } from "@/app/auth/actions";
+import {
+  AuthenticatedAppShell,
+  getProtectedAppShellContext,
+} from "@/components/app/protected-app-shell";
+import { ModulePage } from "@/components/app/module-page";
 import { AuthFormMessage } from "@/components/auth/auth-form-message";
-import { getAuthenticatedSession } from "@/lib/auth/session";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Field, Input } from "@/components/ui/form";
 
 export const dynamic = "force-dynamic";
 
@@ -13,61 +20,63 @@ type ProfilePageProps = {
 
 export default async function ProfilePage({ searchParams }: ProfilePageProps) {
   const params = await searchParams;
-  const { profile } = await getAuthenticatedSession("/app/profile");
+  const context = await getProtectedAppShellContext("/app/profile");
+  const { profile } = context;
 
   return (
-    <main className="min-h-dvh px-6 py-8 sm:px-10 lg:px-12">
-      <section className="mx-auto grid w-full max-w-2xl gap-8">
-        <header className="border-border border-b pb-5">
-          <p className="text-muted-foreground text-sm font-medium">
-            Planner Vida
-          </p>
-          <h1 className="text-foreground mt-2 text-3xl font-semibold">
-            Perfil
-          </h1>
-        </header>
+    <AuthenticatedAppShell context={context}>
+      <ModulePage
+        description="Preferencias basicas do usuario autenticado preservadas pela camada de Auth/RLS congelada na M04."
+        eyebrow="Configuracoes"
+        title="Perfil"
+      >
+        <Card className="max-w-2xl">
+          <CardContent className="grid gap-5 pt-4">
+            <AuthFormMessage error={params.error} message={params.message} />
 
-        <AuthFormMessage error={params.error} message={params.message} />
-
-        <form action={updateProfileAction} className="grid gap-4">
-          <label className="grid gap-2 text-sm font-medium">
-            Nome
-            <input
-              className="border-border rounded-md border bg-transparent px-3 py-2 text-base font-normal"
-              defaultValue={profile.display_name}
-              name="displayName"
-              required
-              type="text"
-            />
-          </label>
-          <label className="grid gap-2 text-sm font-medium">
-            Fuso horário
-            <input
-              className="border-border rounded-md border bg-transparent px-3 py-2 text-base font-normal"
-              defaultValue={profile.default_timezone}
-              name="defaultTimezone"
-              required
-              type="text"
-            />
-          </label>
-          <label className="grid gap-2 text-sm font-medium">
-            Idioma
-            <input
-              className="border-border rounded-md border bg-transparent px-3 py-2 text-base font-normal"
-              defaultValue={profile.locale}
-              name="locale"
-              required
-              type="text"
-            />
-          </label>
-          <button
-            className="bg-primary text-primary-foreground rounded-md px-4 py-2 text-sm font-semibold"
-            type="submit"
-          >
-            Salvar
-          </button>
-        </form>
-      </section>
-    </main>
+            <form action={updateProfileAction} className="grid gap-4">
+              <Field htmlFor="displayName" label="Nome">
+                <Input
+                  defaultValue={profile.display_name}
+                  id="displayName"
+                  name="displayName"
+                  required
+                  type="text"
+                />
+              </Field>
+              <Field htmlFor="defaultTimezone" label="Fuso horario">
+                <Input
+                  defaultValue={profile.default_timezone}
+                  id="defaultTimezone"
+                  name="defaultTimezone"
+                  required
+                  type="text"
+                />
+              </Field>
+              <Field htmlFor="locale" label="Idioma">
+                <Input
+                  defaultValue={profile.locale}
+                  id="locale"
+                  name="locale"
+                  required
+                  type="text"
+                />
+              </Field>
+              <Field htmlFor="currency" label="Moeda">
+                <Input
+                  disabled
+                  id="currency"
+                  type="text"
+                  value={profile.default_currency}
+                />
+              </Field>
+              <Button className="justify-self-start" type="submit">
+                Salvar
+              </Button>
+            </form>
+          </CardContent>
+        </Card>
+      </ModulePage>
+    </AuthenticatedAppShell>
   );
 }
