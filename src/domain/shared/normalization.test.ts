@@ -28,7 +28,67 @@ describe("normalization primitives", () => {
 
   it("creates versioned fingerprints from canonicalized parts", () => {
     expect(
-      createFingerprint(["Mercado São José", "2026-09-15", "123.45"]),
-    ).toBe(`${NORMALIZATION_VERSION}:mercado sao jose|2026 09 15|123 45`);
+      createFingerprint([
+        { field: "merchant", type: "merchant", value: "Mercado São José" },
+        { field: "transaction_date", type: "local-date", value: "2026-09-15" },
+        { field: "amount", type: "money", value: "123.45" },
+      ]),
+    ).toBe(
+      `${NORMALIZATION_VERSION}:${JSON.stringify([
+        {
+          index: 0,
+          field: "merchant",
+          type: "merchant",
+          value: "sao jose",
+        },
+        {
+          index: 1,
+          field: "transaction date",
+          type: "local-date",
+          value: "2026-09-15",
+        },
+        {
+          index: 2,
+          field: "amount",
+          type: "money",
+          value: { amount: "123.4500" },
+        },
+      ])}`,
+    );
+  });
+
+  it("preserves date and money semantics instead of text-search tokens", () => {
+    const fingerprint = createFingerprint([
+      { field: "date", type: "local-date", value: "2026-09-15" },
+      { field: "amount", type: "money", value: "123.45" },
+    ]);
+
+    expect(fingerprint).toContain('"value":"2026-09-15"');
+    expect(fingerprint).toContain('"amount":"123.4500"');
+    expect(fingerprint).not.toContain("2026 09 15");
+    expect(fingerprint).not.toContain("123 45");
+  });
+
+  it("keeps field order and null semantics deterministic", () => {
+    const ordered = createFingerprint([
+      { field: "a", type: "text", value: "Alpha" },
+      { field: "b", type: "text", value: "Beta" },
+      null,
+    ]);
+    const reordered = createFingerprint([
+      { field: "b", type: "text", value: "Beta" },
+      { field: "a", type: "text", value: "Alpha" },
+      null,
+    ]);
+
+    expect(ordered).toBe(
+      createFingerprint([
+        { field: "a", type: "text", value: "  ÁLpha " },
+        { field: "b", type: "text", value: "Beta" },
+        null,
+      ]),
+    );
+    expect(ordered).not.toBe(reordered);
+    expect(ordered).toContain('"type":"null"');
   });
 });

@@ -24,7 +24,7 @@ describe("validation schema conventions", () => {
     });
     expect(moneyField()("42", "amount")).toEqual({
       ok: true,
-      value: { amount: "42.00", currency: "BRL" },
+      value: { amount: "42.0000", currency: "BRL" },
     });
   });
 
@@ -40,7 +40,7 @@ describe("validation schema conventions", () => {
         },
       ],
     });
-    expect(moneyField()("1.999", "amount")).toMatchObject({
+    expect(moneyField()("1.99999", "amount")).toMatchObject({
       ok: false,
       issues: [{ path: "amount", code: "invalid_money" }],
     });

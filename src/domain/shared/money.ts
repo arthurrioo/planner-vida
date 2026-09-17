@@ -1,9 +1,12 @@
 const decimalPattern = /^-?\d+(\.\d+)?$/;
 const ZERO = BigInt(0);
-const ONE_HUNDRED = BigInt(100);
+const TEN = BigInt(10);
 
 export const DEFAULT_CURRENCY_CODE = "BRL" as const;
-export const DEFAULT_MONEY_SCALE = 2;
+export const MONEY_STORAGE_SCALE = 4;
+export const BRL_MINOR_UNIT_SCALE = 2;
+export const DEFAULT_MONEY_SCALE = MONEY_STORAGE_SCALE;
+export const MONEY_NUMERIC_PRECISION = 19;
 
 export type CurrencyCode = typeof DEFAULT_CURRENCY_CODE;
 
@@ -57,8 +60,11 @@ export function moneyFromMinorUnits(
   }
 
   const absolute = isNegative ? -cents : cents;
-  const integer = absolute / ONE_HUNDRED;
-  const fraction = (absolute % ONE_HUNDRED).toString().padStart(2, "0");
+  const minorUnitFactor = pow10(BRL_MINOR_UNIT_SCALE);
+  const integer = absolute / minorUnitFactor;
+  const fraction = (absolute % minorUnitFactor)
+    .toString()
+    .padStart(BRL_MINOR_UNIT_SCALE, "0");
 
   return parseMoney(`${isNegative ? "-" : ""}${integer}.${fraction}`, options);
 }
@@ -118,8 +124,10 @@ export function normalizeDecimalString(
     throw new MoneyError("Money must be provided as a decimal string.");
   }
 
-  if (!Number.isInteger(scale) || scale < 0) {
-    throw new MoneyError("Money scale must be a non-negative integer.");
+  if (scale % 1 !== 0 || scale < 0 || scale > MONEY_STORAGE_SCALE) {
+    throw new MoneyError(
+      `Money scale must be an integer between 0 and ${MONEY_STORAGE_SCALE}.`,
+    );
   }
 
   const isNegative = normalized.startsWith("-");
@@ -139,6 +147,16 @@ export function normalizeDecimalString(
 
   const canonicalInteger = integerPart.replace(/^0+(?=\d)/, "");
   const canonicalFraction = rawFraction.padEnd(scale, "0");
+
+  if (
+    canonicalInteger.length + canonicalFraction.length >
+    MONEY_NUMERIC_PRECISION
+  ) {
+    throw new MoneyError(
+      `Money cannot exceed NUMERIC(${MONEY_NUMERIC_PRECISION},${scale}) precision.`,
+    );
+  }
+
   const canonical =
     scale === 0 ? canonicalInteger : `${canonicalInteger}.${canonicalFraction}`;
 
@@ -163,7 +181,8 @@ function toScaledInteger(value: DecimalString) {
   const isNegative = value.startsWith("-");
   const unsigned = isNegative ? value.slice(1) : value;
   const [integerPart, fractionPart = ""] = unsigned.split(".");
-  const units = BigInt(`${integerPart}${fractionPart}`);
+  const scaleAdjustedFraction = fractionPart.padEnd(DEFAULT_MONEY_SCALE, "0");
+  const units = BigInt(`${integerPart}${scaleAdjustedFraction}`);
 
   return isNegative ? -units : units;
 }
@@ -181,4 +200,14 @@ function fromScaledInteger(value: bigint, scale = DEFAULT_MONEY_SCALE) {
   const fractionPart = raw.slice(-scale);
 
   return `${isNegative ? "-" : ""}${integerPart}.${fractionPart}`;
+}
+
+function pow10(scale: number) {
+  let result = BigInt(1);
+
+  for (let index = 0; index < scale; index += 1) {
+    result *= TEN;
+  }
+
+  return result;
 }

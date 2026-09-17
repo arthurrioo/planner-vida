@@ -1,3 +1,5 @@
+import { DomainError } from "./domain-error";
+
 export type UserId = string & { readonly __brand: "UserId" };
 
 export type RepositoryContext = Readonly<{
@@ -17,7 +19,9 @@ export type OwnedRepository<TRecord extends OwnedRecord> = Readonly<{
 
 export function asUserId(value: string): UserId {
   if (!value.trim()) {
-    throw new Error("UserId is required.");
+    throw new DomainError("VALIDATION_FAILED", "UserId is required.", {
+      details: { field: "userId" },
+    });
   }
 
   return value as UserId;
@@ -28,6 +32,12 @@ export function assertOwnedByContext(
   record: OwnedRecord,
 ) {
   if (record.userId !== context.userId) {
-    throw new Error("Owned record user_id must match the repository context.");
+    throw new DomainError(
+      "OWNERSHIP_MISMATCH",
+      "Owned record user_id must match the repository context.",
+      {
+        details: { recordId: record.id },
+      },
+    );
   }
 }
