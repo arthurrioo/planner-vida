@@ -197,6 +197,127 @@ No schema migration, persistence table, SQL implementation, account/category/tra
 - Hosted Supabase/GoTrue was not exercised; this remediation did not alter hosted auth or schema behavior.
 - E2E and PostgreSQL runtime harnesses require outside-sandbox execution because local port binding and shared memory are blocked in the sandbox.
 
+## 15. N1 Micro-Remediation Final Report
+
+### 15.1 Commit Scope
+
+- Old HEAD before N1 micro-remediation: `0abc9bd784615a0ad77b82dcc622afe0d3356669`.
+- New N1 micro-remediation commit: this committed change set on `milestone-06-shared-domain-foundations`; the exact Git hash is recorded in the final handoff after commit creation.
+- PR: #5, `Milestone 06 - Shared Domain Foundations`, open against `main`.
+- Branch: `milestone-06-shared-domain-foundations`.
+
+Files changed for N1:
+
+- `src/domain/shared/redaction.ts`
+- `src/domain/shared/audit-logging.test.ts`
+- `docs/milestone-06-review-remediation-report.md`
+
+No Money, Fingerprint, DomainError, Idempotency, schema/RLS/Auth, shell/navigation, M05, M07+, Frozen docs, or `Markdown Files/` files were changed.
+
+### 15.2 N1 Status
+
+N1 - over-redaction of common key names by substring matching - is RESOLVED.
+
+The previous single broad regular expression matched sensitive fragments inside unrelated words, including `pan` inside `company`, `expand`, `japan`, `panel`, and `span`; `mobile` inside `automobile`; `document` inside `documentation` and `documentary`; and `tax_id`/`taxId`-style intent inside `taxidermist`.
+
+The final key-name policy now tokenizes key names before matching. It splits camelCase/PascalCase/acronym boundaries and snake_case/kebab-case/non-alphanumeric separators into lowercase tokens, then matches only explicit sensitive tokens or explicit sensitive token sequences. Compact exact aliases are preserved for supported joined aliases such as `taxid`, `cardpan`, `accountnumber`, and `documentnumber`.
+
+Value-level redaction was not reduced or changed.
+
+### 15.3 Alias Matrix
+
+Negative aliases tested and confirmed NOT redacted:
+
+| Key               | Status       |
+| ----------------- | ------------ |
+| `company`         | NOT REDACTED |
+| `companyName`     | NOT REDACTED |
+| `expand`          | NOT REDACTED |
+| `expandable`      | NOT REDACTED |
+| `isExpanded`      | NOT REDACTED |
+| `japan`           | NOT REDACTED |
+| `panel`           | NOT REDACTED |
+| `span`            | NOT REDACTED |
+| `automobile`      | NOT REDACTED |
+| `automobileValue` | NOT REDACTED |
+| `documentation`   | NOT REDACTED |
+| `documentary`     | NOT REDACTED |
+| `taxidermist`     | NOT REDACTED |
+| `accountName`     | NOT REDACTED |
+| `cardBrand`       | NOT REDACTED |
+
+Positive aliases tested and confirmed redacted:
+
+| Key              | Status   |
+| ---------------- | -------- |
+| `pan`            | REDACTED |
+| `card_pan`       | REDACTED |
+| `cardPan`        | REDACTED |
+| `mobile`         | REDACTED |
+| `mobile_phone`   | REDACTED |
+| `mobilePhone`    | REDACTED |
+| `document`       | REDACTED |
+| `document_id`    | REDACTED |
+| `documentNumber` | REDACTED |
+| `tax_id`         | REDACTED |
+| `taxId`          | REDACTED |
+| `account_number` | REDACTED |
+| `accountNumber`  | REDACTED |
+| `card_number`    | REDACTED |
+| `cardNumber`     | REDACTED |
+| `email`          | REDACTED |
+| `cpf`            | REDACTED |
+| `cnpj`           | REDACTED |
+| `iban`           | REDACTED |
+| `password`       | REDACTED |
+| `serviceRoleKey` | REDACTED |
+| `authorization`  | REDACTED |
+| `apiKey`         | REDACTED |
+| `pdfPassword`    | REDACTED |
+| `token`          | REDACTED |
+| `secret`         | REDACTED |
+| `credential`     | REDACTED |
+
+Nested object and nested array redaction tests from the F5 remediation remain covered and passing.
+
+### 15.4 Regression Gates
+
+Executed for N1 micro-remediation:
+
+- `npm ci` - PASSED.
+- `npm run validate:env:ci` - PASSED.
+- `npm run check:secrets` - PASSED.
+- `npm run format:check` - PASSED after formatting `src/domain/shared/redaction.ts` and `docs/milestone-06-review-remediation-report.md`.
+- `npm run lint` - PASSED.
+- `npm run typecheck` - PASSED.
+- `npm run typecheck:e2e` - PASSED.
+- `npx vitest run src/domain/shared/audit-logging.test.ts` - PASSED, 1 file / 7 tests.
+- `npx vitest run src/domain/shared/*.test.ts` - PASSED, 9 files / 40 tests.
+- `npm run test` - PASSED, 21 files / 86 tests.
+- `npm run build` - PASSED.
+- `npm run test:e2e` - PASSED outside sandbox, 14 tests.
+- `npm run verify:schema:m03` - PASSED.
+- `npm run verify:runtime:m03:pg` - PASSED outside sandbox, 2 clean reset cycles.
+- `npm run verify:runtime:m04:auth` - PASSED outside sandbox, 2 clean reset cycles.
+
+Sandbox limitations observed:
+
+- `npm run test:e2e` failed inside sandbox with `listen EPERM 0.0.0.0:3000`; rerun outside sandbox passed.
+- `npm run verify:runtime:m03:pg` failed inside sandbox on PostgreSQL shared memory `shmget`; rerun outside sandbox passed.
+- `npm run verify:runtime:m04:auth` failed inside sandbox on PostgreSQL shared memory `shmget`; rerun outside sandbox passed.
+
+### 15.5 Prior Findings, Scope, and Remaining Deferrals
+
+- F1 Money remains RESOLVED; untouched by this micro-remediation.
+- F2 Fingerprint remains RESOLVED; untouched by this micro-remediation.
+- F3 DomainError remains RESOLVED; untouched by this micro-remediation.
+- F4 Idempotency remains RESOLVED; untouched by this micro-remediation.
+- F5 PII coverage remains RESOLVED; nested object/array and value-level redaction coverage remains passing.
+- N2 generic `Error` residual remains deferred as MINOR/FUTURE; intentionally not fixed in this micro-remediation.
+- M03 schema/runtime gates passed with the outside-sandbox runtime limitation noted above.
+- M04 auth/RLS runtime gate passed with the outside-sandbox runtime limitation noted above.
+- M05 E2E protected-route/deep-link/navigation smoke passed with the outside-sandbox runtime limitation noted above.
+
 ## Final Status
 
-READY FOR INDEPENDENT MILESTONE 06 RE-REVIEW
+READY FOR INDEPENDENT MILESTONE 06 FINAL RE-REVIEW

@@ -1,5 +1,48 @@
-const sensitiveKeyPattern =
-  /(password|senha|token|secret|credential|service[_-]?role|authorization|api[_-]?key|pdf[_-]?password|e-?mail|cpf|cnpj|documento|document[_-]?(id|number)?|tax[_-]?id|phone|telefone|mobile|cellphone|card[_-]?(number|pan)|credit[_-]?card|pan|account[_-]?(number|no)|bank[_-]?account|iban)/i;
+const sensitiveSingleKeyTokens = new Set([
+  "authorization",
+  "cellphone",
+  "cnpj",
+  "cpf",
+  "credential",
+  "credentials",
+  "document",
+  "documento",
+  "email",
+  "iban",
+  "mobile",
+  "pan",
+  "password",
+  "phone",
+  "secret",
+  "secrets",
+  "senha",
+  "telefone",
+  "token",
+  "tokens",
+]);
+
+const sensitiveKeyTokenSequences = [
+  ["account", "no"],
+  ["account", "number"],
+  ["api", "key"],
+  ["bank", "account"],
+  ["card", "number"],
+  ["card", "pan"],
+  ["credit", "card"],
+  ["document", "id"],
+  ["document", "number"],
+  ["e", "mail"],
+  ["mobile", "phone"],
+  ["pdf", "password"],
+  ["phone", "number"],
+  ["service", "role"],
+  ["tax", "id"],
+];
+
+const sensitiveCompactKeyAliases = new Set(
+  sensitiveKeyTokenSequences.map((sequence) => sequence.join("")),
+);
+
 const emailPattern = /[^\s@]+@[^\s@]+\.[^\s@]+/g;
 const cpfPattern = /\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b/g;
 const phonePattern = /\+?\d{1,3}?\s?\(?\d{2}\)?[\s-]?\d{4,5}[\s-]?\d{4}\b/g;
@@ -61,10 +104,42 @@ export function redactSensitivePayload(
       .slice(0, MAX_LOG_OBJECT_KEYS)
       .map(([key, nestedValue]) => [
         key,
-        sensitiveKeyPattern.test(key)
+        isSensitiveKeyName(key)
           ? REDACTED_VALUE
           : redactSensitivePayload(nestedValue, depth + 1, seen),
       ]),
+  );
+}
+
+function isSensitiveKeyName(key: string) {
+  const tokens = tokenizeKeyName(key);
+
+  return (
+    tokens.some((token) => sensitiveSingleKeyTokens.has(token)) ||
+    sensitiveKeyTokenSequences.some((sequence) =>
+      hasTokenSequence(tokens, sequence),
+    ) ||
+    sensitiveCompactKeyAliases.has(
+      key.replace(/[^a-zA-Z0-9]/g, "").toLowerCase(),
+    )
+  );
+}
+
+function tokenizeKeyName(key: string) {
+  return key
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
+    .split(/[^a-zA-Z0-9]+|\s+/)
+    .filter(Boolean)
+    .map((token) => token.toLowerCase());
+}
+
+function hasTokenSequence(tokens: string[], sequence: string[]) {
+  return tokens.some((_, startIndex) =>
+    sequence.every(
+      (sequenceToken, sequenceIndex) =>
+        tokens[startIndex + sequenceIndex] === sequenceToken,
+    ),
   );
 }
 
