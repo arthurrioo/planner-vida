@@ -39,6 +39,8 @@ const sensitiveKeyTokenSequences = [
   ["tax", "id"],
 ];
 
+const sensitiveSequenceKeyTokens = new Set(sensitiveKeyTokenSequences.flat());
+
 const sensitiveCompactKeyAliases = new Set(
   sensitiveKeyTokenSequences.map((sequence) => sequence.join("")),
 );
@@ -112,7 +114,7 @@ export function redactSensitivePayload(
 }
 
 function isSensitiveKeyName(key: string) {
-  const tokens = tokenizeKeyName(key);
+  const tokens = tokenizeKeyName(key).map(normalizeSensitiveKeyToken);
 
   return (
     tokens.some((token) => sensitiveSingleKeyTokens.has(token)) ||
@@ -123,6 +125,23 @@ function isSensitiveKeyName(key: string) {
       key.replace(/[^a-zA-Z0-9]/g, "").toLowerCase(),
     )
   );
+}
+
+function normalizeSensitiveKeyToken(token: string) {
+  if (sensitiveSingleKeyTokens.has(token)) {
+    return token;
+  }
+
+  if (!token.endsWith("s")) {
+    return token;
+  }
+
+  const singular = token.slice(0, -1);
+
+  return sensitiveSingleKeyTokens.has(singular) ||
+    sensitiveSequenceKeyTokens.has(singular)
+    ? singular
+    : token;
 }
 
 function tokenizeKeyName(key: string) {

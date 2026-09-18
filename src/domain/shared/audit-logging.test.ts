@@ -181,6 +181,69 @@ describe("audit and structured logging helpers", () => {
     });
   });
 
+  it("redacts controlled plural sensitive key tokens without substring false positives", () => {
+    expect(
+      redactSensitivePayload({
+        documents: "sensitive",
+        documentsArchive: "sensitive",
+        document_ids: "sensitive",
+        documentIds: "sensitive",
+        emails: "sensitive",
+        phones: "sensitive",
+        mobiles: "sensitive",
+        ibans: "sensitive",
+        cpfs: "sensitive",
+        cnpjs: "sensitive",
+        tokens: "sensitive",
+        secrets: "sensitive",
+        credentials: "sensitive",
+        accountNumberMasked: "sensitive",
+        creditCardNumber: "sensitive",
+      }),
+    ).toEqual({
+      documents: REDACTED_VALUE,
+      documentsArchive: REDACTED_VALUE,
+      document_ids: REDACTED_VALUE,
+      documentIds: REDACTED_VALUE,
+      emails: REDACTED_VALUE,
+      phones: REDACTED_VALUE,
+      mobiles: REDACTED_VALUE,
+      ibans: REDACTED_VALUE,
+      cpfs: REDACTED_VALUE,
+      cnpjs: REDACTED_VALUE,
+      tokens: REDACTED_VALUE,
+      secrets: REDACTED_VALUE,
+      credentials: REDACTED_VALUE,
+      accountNumberMasked: REDACTED_VALUE,
+      creditCardNumber: REDACTED_VALUE,
+    });
+
+    const safeKeys = {
+      company: "safe",
+      companyName: "safe",
+      expand: "safe",
+      expandable: "safe",
+      isExpanded: "safe",
+      expansion: "safe",
+      companion: "safe",
+      panama: "safe",
+      japan: "safe",
+      panel: "safe",
+      span: "safe",
+      automobile: "safe",
+      automobileValue: "safe",
+      mobilestore: "safe",
+      documentation: "safe",
+      documentary: "safe",
+      taxidermist: "safe",
+      taxIdentifier: "safe",
+      accountName: "safe",
+      cardBrand: "safe",
+    };
+
+    expect(redactSensitivePayload(safeKeys)).toEqual(safeKeys);
+  });
+
   it("redacts high-confidence PII values inside nested arrays", () => {
     expect(
       redactSensitivePayload({

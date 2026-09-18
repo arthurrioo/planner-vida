@@ -318,6 +318,130 @@ Sandbox limitations observed:
 - M04 auth/RLS runtime gate passed with the outside-sandbox runtime limitation noted above.
 - M05 E2E protected-route/deep-link/navigation smoke passed with the outside-sandbox runtime limitation noted above.
 
+## 16. N3 Micro-Remediation Final Report
+
+### 16.1 Commit Scope
+
+- Old HEAD before N3 micro-remediation: `2e1898bc1458132b3fc4ff3dea5740dd2b7b8c69`.
+- New N3 micro-remediation commit: this committed change set on `milestone-06-shared-domain-foundations`; the exact Git hash is recorded in the final handoff after commit creation.
+- PR: #5, `Milestone 06 - Shared Domain Foundations`, open against `main`.
+- Branch: `milestone-06-shared-domain-foundations`.
+
+Files changed for N3:
+
+- `src/domain/shared/redaction.ts`
+- `src/domain/shared/audit-logging.test.ts`
+- `docs/milestone-06-review-remediation-report.md`
+
+No Money, Fingerprint, Repository/DomainError, Idempotency, schema/RLS/Auth, shell/navigation, M05, M07+, Frozen docs, or `Markdown Files/` files were changed.
+
+### 16.2 N3 Status
+
+N3 - plural sensitive key tokens were not consistently recognized after the token-aware N1 remediation - is RESOLVED.
+
+The final matcher keeps the N1 token-aware boundary and adds controlled singularization for trailing `s` only when the singular token is already part of the explicit sensitive key vocabulary or part of an explicit sensitive token sequence. This makes plural handling intentional and predictable without returning to substring matching, stemming, fuzzy matching, or locale-dependent logic.
+
+Value-level redaction was not changed.
+
+### 16.3 Positive Matrix
+
+Positive aliases tested and confirmed redacted:
+
+| Key                   | Status   |
+| --------------------- | -------- |
+| `documents`           | REDACTED |
+| `documentsArchive`    | REDACTED |
+| `document_ids`        | REDACTED |
+| `documentIds`         | REDACTED |
+| `emails`              | REDACTED |
+| `phones`              | REDACTED |
+| `mobiles`             | REDACTED |
+| `ibans`               | REDACTED |
+| `cpfs`                | REDACTED |
+| `cnpjs`               | REDACTED |
+| `tokens`              | REDACTED |
+| `secrets`             | REDACTED |
+| `credentials`         | REDACTED |
+| `accountNumberMasked` | REDACTED |
+| `creditCardNumber`    | REDACTED |
+
+Prior positive aliases remain covered by the N1/F5 matrix, including `pan`, `cardPan`, `mobilePhone`, `documentNumber`, `taxId`, `accountNumber`, `cardNumber`, `email`, `cpf`, `cnpj`, `iban`, `password`, `authorization`, `apiKey`, `pdfPassword`, and `serviceRoleKey`.
+
+### 16.4 Negative Matrix
+
+Regression aliases tested and confirmed not redacted:
+
+| Key               | Status       |
+| ----------------- | ------------ |
+| `company`         | NOT REDACTED |
+| `companyName`     | NOT REDACTED |
+| `expand`          | NOT REDACTED |
+| `expandable`      | NOT REDACTED |
+| `isExpanded`      | NOT REDACTED |
+| `expansion`       | NOT REDACTED |
+| `companion`       | NOT REDACTED |
+| `panama`          | NOT REDACTED |
+| `japan`           | NOT REDACTED |
+| `panel`           | NOT REDACTED |
+| `span`            | NOT REDACTED |
+| `automobile`      | NOT REDACTED |
+| `automobileValue` | NOT REDACTED |
+| `mobilestore`     | NOT REDACTED |
+| `documentation`   | NOT REDACTED |
+| `documentary`     | NOT REDACTED |
+| `taxidermist`     | NOT REDACTED |
+| `taxIdentifier`   | NOT REDACTED |
+| `accountName`     | NOT REDACTED |
+| `cardBrand`       | NOT REDACTED |
+
+### 16.5 Failing-Then-Passing Evidence
+
+The new plural matrix was added before the implementation change and failed against the `2e1898b` matcher:
+
+- `npx vitest run src/domain/shared/audit-logging.test.ts` - FAILED before fix, with `documents`, `documentsArchive`, `emails`, `phones`, `mobiles`, `ibans`, `cpfs`, and `cnpjs` remaining unredacted.
+
+After the controlled plural handling change:
+
+- `npx vitest run src/domain/shared/audit-logging.test.ts` - PASSED, 1 file / 8 tests.
+
+### 16.6 Regression Gates
+
+Executed for N3 micro-remediation:
+
+- `npm ci` - PASSED.
+- `npm run validate:env:ci` - PASSED.
+- `npm run check:secrets` - PASSED.
+- `npm run format:check` - PASSED.
+- `npm run lint` - PASSED.
+- `npm run typecheck` - PASSED.
+- `npm run typecheck:e2e` - PASSED.
+- `npx vitest run src/domain/shared/audit-logging.test.ts` - PASSED, 1 file / 8 tests.
+- `npx vitest run src/domain/shared/*.test.ts` - PASSED, 9 files / 41 tests.
+- `npm run test` - PASSED, 21 files / 87 tests.
+- `npm run build` - PASSED.
+- `npm run test:e2e` - PASSED outside sandbox, 14 tests.
+- `npm run verify:schema:m03` - PASSED.
+- `npm run verify:runtime:m03:pg` - PASSED outside sandbox, 2 clean reset cycles.
+- `npm run verify:runtime:m04:auth` - PASSED outside sandbox, 2 clean reset cycles.
+- `git diff --check` - PASSED.
+
+Sandbox limitations observed:
+
+- `npm run test:e2e` failed inside sandbox with `listen EPERM 0.0.0.0:3000`; rerun outside sandbox passed.
+- `npm run verify:runtime:m03:pg` failed inside sandbox on PostgreSQL shared memory `shmget`; rerun outside sandbox passed.
+- `npm run verify:runtime:m04:auth` failed inside sandbox on PostgreSQL shared memory `shmget`; rerun outside sandbox passed.
+
+### 16.7 Prior Findings, Scope, and Remaining Deferrals
+
+- F1 Money remains RESOLVED; untouched by this micro-remediation.
+- F2 Fingerprint remains RESOLVED; untouched by this micro-remediation.
+- F3 DomainError remains RESOLVED; untouched by this micro-remediation.
+- F4 Idempotency remains RESOLVED; untouched by this micro-remediation.
+- F5 original PII coverage remains RESOLVED; prior positives remain covered and passing.
+- N1 over-redaction remains RESOLVED; substring false positives remain covered and passing.
+- N2 generic `Error` residual remains deferred as MINOR/FUTURE; intentionally not fixed in this micro-remediation.
+- M03 schema/runtime, M04 auth/RLS runtime, and M05 E2E regression gates passed with the outside-sandbox limitations noted above.
+
 ## Final Status
 
 READY FOR INDEPENDENT MILESTONE 06 FINAL RE-REVIEW
