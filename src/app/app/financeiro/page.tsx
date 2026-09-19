@@ -1,14 +1,37 @@
+import Link from "next/link";
+
 import { ModulePage } from "@/components/app/module-page";
 import { ProtectedAppShell } from "@/components/app/protected-app-shell";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 export default function FinanceiroPage() {
   return (
     <ProtectedAppShell nextPath="/app/financeiro">
       <ModulePage
-        description="Entrada do bloco financeiro AFR-compatible, ainda sem operacoes de dominio nesta M05."
+        description="Entrada do bloco financeiro AFR-compatible, usando contas como base de saldo calculado."
         eyebrow="Controle financeiro"
         title="Financeiro"
-      />
+      >
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Card>
+            <CardHeader>
+              <CardTitle>Contas</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-muted-foreground mb-4 text-sm leading-6">
+                Cadastre contas, saldos iniciais, limites e status sem criar
+                saldo atual mutavel.
+              </p>
+              <Link
+                className="bg-primary text-primary-foreground hover:bg-primary/90 inline-flex h-10 items-center justify-center rounded-md px-4 text-sm font-medium"
+                href="/app/financeiro/contas"
+              >
+                Abrir contas
+              </Link>
+            </CardContent>
+          </Card>
+        </div>
+      </ModulePage>
     </ProtectedAppShell>
   );
 }
