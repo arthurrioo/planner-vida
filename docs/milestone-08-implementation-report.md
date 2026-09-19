@@ -86,8 +86,8 @@ Categories Freeze.
 - Branch: `milestone-08-categories-subcategories`
 - Implementation commit: `4936a337bc6856b6c536863534733547e3f2d197`
 - Initial report commit: `d2833b4c040e5f1224e5ad48a9618864a1249903`
-- Final validation metadata commit: created after this report update.
-- PR: opened after final validation and push.
+- Final validation metadata commit: `613dd5a78e786e99fcbc6f0a72f8de564cbbbb3c`
+- PR: [#7 - Milestone 08 - Categories and Subcategories](https://github.com/arthurrioo/planner-vida/pull/7)
 - Base: `main` at `9b8bac7`, which contains `Merge pull request #6 from arthurrioo/milestone-07-accounts`.
 
 ## 3. Files Altered
