@@ -85,7 +85,8 @@ Categories Freeze.
 
 - Branch: `milestone-08-categories-subcategories`
 - Implementation commit: `4936a337bc6856b6c536863534733547e3f2d197`
-- Report commit: created after this report is added.
+- Initial report commit: `d2833b4c040e5f1224e5ad48a9618864a1249903`
+- Final validation metadata commit: created after this report update.
 - PR: opened after final validation and push.
 - Base: `main` at `9b8bac7`, which contains `Merge pull request #6 from arthurrioo/milestone-07-accounts`.
 
@@ -159,14 +160,22 @@ M07 Accounts was used as implementation reference for service/repository/UI/acti
 
 ## 8. Tests Executed and Results
 
-Executed before report creation:
+Final gate run:
 
+- `npm ci` - PASS
+- `npm run validate:env:ci` - PASS
+- `npm run check:secrets` - PASS
+- `npm run format:check` - PASS
 - `npm run lint` - PASS
 - `npm run typecheck` - PASS
-- `npm run test` - PASS, 30 files / 131 tests
 - `npm run typecheck:e2e` - PASS
+- `npm run test` - PASS, 30 files / 131 tests
 - `npm run build` - PASS
 - `npm run test:e2e` - PASS outside sandbox, 14/14
+- `npm run verify:schema:m03` - PASS
+- `npm run verify:runtime:m03:pg` - PASS outside sandbox, 2 clean reset cycles
+- `npm run verify:runtime:m04:auth` - PASS outside sandbox, 2 clean reset cycles
+- `npm run verify:runtime:m07:accounts` - PASS outside sandbox
 - `npm run verify:runtime:m08:categories` - PASS outside sandbox
 
 Sandbox notes:
@@ -189,9 +198,7 @@ M08 is additive and leaves frozen milestone contracts intact:
 - M04: auth/session and RLS patterns reused, no policy relaxation.
 - M05: existing shell/cards/forms/responsive table reused.
 - M06: shared foundations reused for enum, normalization, errors, audit, repository context.
-- M07: Accounts modules untouched except as reference pattern.
-
-Final full gate run is performed after this report commit.
+- M07: Accounts modules untouched except as reference pattern; M07 runtime harness passed after M08 changes.
 
 ## 11. Frozen Docs, Markdown Files, and M09+ Status
 
