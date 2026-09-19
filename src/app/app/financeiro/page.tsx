@@ -30,6 +30,24 @@ export default function FinanceiroPage() {
               </Link>
             </CardContent>
           </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Categorias</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-muted-foreground mb-4 text-sm leading-6">
+                Organize receitas, despesas, investimentos e transferencias em
+                categorias e subcategorias canonicas.
+              </p>
+              <Link
+                className="bg-primary text-primary-foreground hover:bg-primary/90 inline-flex h-10 items-center justify-center rounded-md px-4 text-sm font-medium"
+                href="/app/financeiro/categorias"
+              >
+                Abrir categorias
+              </Link>
+            </CardContent>
+          </Card>
         </div>
       </ModulePage>
     </ProtectedAppShell>

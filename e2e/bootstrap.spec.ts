@@ -24,6 +24,7 @@ test("phase 1 navigation routes preserve exact protected deep links", async ({
     "/app/planner",
     "/app/financeiro",
     "/app/financeiro/contas",
+    "/app/financeiro/categorias",
     "/app/compras",
     "/app/patrimonio",
     "/app/recorrentes",
@@ -41,7 +42,12 @@ test("phase 1 navigation routes preserve exact protected deep links", async ({
 test("direct refresh of protected deep links preserves exact next target", async ({
   page,
 }) => {
-  const routes = ["/app", "/app/profile", "/app/financeiro/contas"];
+  const routes = [
+    "/app",
+    "/app/profile",
+    "/app/financeiro/contas",
+    "/app/financeiro/categorias",
+  ];
 
   for (const route of routes) {
     await page.goto(route);

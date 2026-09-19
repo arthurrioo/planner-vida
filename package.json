@@ -19,6 +19,7 @@
     "verify:runtime:m03:pg": "node scripts/run-m03-runtime-harness.mjs",
     "verify:runtime:m04:auth": "node scripts/run-m04-auth-rls-harness.mjs",
     "verify:runtime:m07:accounts": "node scripts/run-m07-accounts-runtime-harness.mjs",
+    "verify:runtime:m08:categories": "node scripts/run-m08-categories-runtime-harness.mjs",
     "check:secrets": "node scripts/check-secrets.mjs",
     "typecheck": "tsc --project tsconfig.json --noEmit",
     "test": "vitest run",
