@@ -7,13 +7,16 @@ import { asUserId } from "@/domain/shared";
 
 const action = vi.fn();
 const userId = asUserId("00000000-0000-4000-8000-000000000811");
+const categoryId =
+  "00000000-0000-4000-8000-000000000821" as CategoryRecord["id"];
+const rootId = "00000000-0000-4000-8000-000000000822" as CategoryRecord["id"];
 
 function category(overrides: Partial<CategoryRecord> = {}): CategoryRecord {
   return {
     archivedAt: null,
     colorToken: null,
     iconKey: null,
-    id: "category-a" as CategoryRecord["id"],
+    id: categoryId,
     isSystemDefault: false,
     name: "Moradia",
     normalizedName: "moradia",
@@ -41,12 +44,12 @@ describe("CategoryForm", () => {
             colorToken: "",
             iconKey: "",
             name: "",
-            parentId: "root-a",
+            parentId: rootId,
             sortOrder: "",
             type: "variable_expense",
           },
         }}
-        rootCategories={[category({ id: "root-a" as CategoryRecord["id"] })]}
+        rootCategories={[category({ id: rootId })]}
         submitLabel="Criar categoria"
       />,
     );

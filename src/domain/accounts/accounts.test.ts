@@ -16,6 +16,7 @@ import {
   parseMoney,
   type AuditEvent,
   type AuditService,
+  type Logger,
   type RepositoryContext,
 } from "@/domain/shared";
 
@@ -140,6 +141,23 @@ function auditRecorder(): AuditService & { events: AuditEvent[] } {
   return {
     events: [],
     async record(event) {
+      this.events.push(event);
+    },
+  };
+}
+
+function failingAuditRecorder(): AuditService {
+  return {
+    async record() {
+      throw new DomainError("EXTERNAL_SERVICE_FAILED", "Audit write failed.");
+    },
+  };
+}
+
+function loggerRecorder(): Logger & { events: unknown[] } {
+  return {
+    events: [],
+    emit(event) {
       this.events.push(event);
     },
   };
@@ -491,6 +509,25 @@ describe("AccountService", () => {
     await service.reactivateAccount(contextA, archived.id);
 
     expect(audit.events.at(-1)?.action).toBe("accounts.reactivate");
+  });
+
+  it("does not convert persisted account mutations into failures when audit write fails", async () => {
+    const logger = loggerRecorder();
+    const repository = createRepository();
+    const service = new AccountService({
+      audit: failingAuditRecorder(),
+      logger,
+      repository,
+    });
+
+    const created = await service.createAccount(contextA, input());
+
+    expect(repository.getRecord(created.id)).toBeDefined();
+    expect(logger.events).toHaveLength(1);
+    expect(logger.events[0]).toMatchObject({
+      context: "AccountService.recordAccountAudit",
+      level: "error",
+    });
   });
 });
 

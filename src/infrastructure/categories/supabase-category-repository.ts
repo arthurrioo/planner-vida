@@ -8,13 +8,7 @@ import {
   type CategoryRecord,
   type CategoryRepository,
 } from "@/domain/categories";
-import {
-  asUserId,
-  DomainError,
-  type AuditEvent,
-  type AuditService,
-  type RepositoryContext,
-} from "@/domain/shared";
+import { asUserId, DomainError, type RepositoryContext } from "@/domain/shared";
 
 type CategoryRow = Readonly<{
   archived_at: string | null;
@@ -239,33 +233,6 @@ export class SupabaseCategoryRepository implements CategoryRepository {
   }
 }
 
-export class SupabaseCategoryAuditService implements AuditService {
-  constructor(private readonly supabase: SupabaseClient) {}
-
-  async record(event: AuditEvent) {
-    const requestId =
-      typeof event.metadata?.requestId === "string"
-        ? event.metadata.requestId
-        : null;
-
-    const { error } = await this.supabase.from("audit_logs").insert({
-      action: event.action,
-      actor_role: event.actor.role ?? "user",
-      actor_user_id: event.actor.userId,
-      correlation_id: requestId,
-      metadata: event.metadata ?? {},
-      resource_id: event.entity?.id ?? null,
-      resource_type: event.entity?.type ?? "category",
-      severity: event.severity,
-      user_id: event.entity?.ownerUserId ?? event.actor.userId,
-    });
-
-    if (error) {
-      throw mapSupabaseError(error);
-    }
-  }
-}
-
 const categoryColumns = [
   "id",
   "user_id",
@@ -358,5 +325,7 @@ function mapSupabaseError(error: { code?: string; message: string }) {
     );
   }
 
-  return new DomainError("UNEXPECTED", error.message);
+  return new DomainError("UNEXPECTED", "Unexpected category storage error.", {
+    details: { source: "database" },
+  });
 }

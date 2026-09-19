@@ -2,6 +2,7 @@ import {
   assertOwnedByContext,
   categoryTypes,
   createAuditEvent,
+  createStructuredLogEvent,
   DomainError,
   enumField,
   invalid,
@@ -9,6 +10,7 @@ import {
   normalizeDisplayText,
   type AuditService,
   type CategoryType,
+  type Logger,
   type RepositoryContext,
   type UserId,
   type ValidationIssue,
@@ -104,17 +106,20 @@ export type CategoryRepository = Readonly<{
 
 export type CategoryServiceOptions = Readonly<{
   audit?: AuditService;
+  logger?: Logger;
   now?: () => Date;
   repository: CategoryRepository;
 }>;
 
 export class CategoryService {
   private readonly audit?: AuditService;
+  private readonly logger?: Logger;
   private readonly now: () => Date;
   private readonly repository: CategoryRepository;
 
   constructor(options: CategoryServiceOptions) {
     this.audit = options.audit;
+    this.logger = options.logger;
     this.now = options.now ?? (() => new Date());
     this.repository = options.repository;
   }
@@ -213,16 +218,34 @@ export class CategoryService {
       });
     }
 
-    const mutation = await this.prepareMutation(context, input, existing.id);
+    const mutation = await this.prepareMutation(context, input, existing);
 
-    if (mutation.parentId !== existing.parentId) {
-      const children = await this.repository.listChildren(context, existing.id);
+    const shouldInspectChildren =
+      mutation.parentId !== existing.parentId ||
+      mutation.type !== existing.type;
+    const children = shouldInspectChildren
+      ? await this.repository.listChildren(context, existing.id)
+      : [];
 
-      if (children.length > 0) {
+    if (mutation.parentId !== existing.parentId && children.length > 0) {
+      throw new DomainError(
+        "CONFLICT",
+        "A category with subcategories cannot become a subcategory.",
+        { details: { field: "parentId" } },
+      );
+    }
+
+    if (mutation.type !== existing.type) {
+      const dependencyCount = await this.repository.countDependencies(
+        context,
+        existing.id,
+      );
+
+      if (dependencyCount > 0 || children.length > 0) {
         throw new DomainError(
           "CONFLICT",
-          "A category with subcategories cannot become a subcategory.",
-          { details: { field: "parentId" } },
+          "Category type cannot change while the category has dependencies or subcategories.",
+          { details: { field: "type" } },
         );
       }
     }
@@ -278,12 +301,47 @@ export class CategoryService {
     return { category, mode: "deleted" };
   }
 
+  async deleteCategoryIfSafe(
+    context: RepositoryContext,
+    id: CategoryId,
+  ): Promise<Extract<CategoryDeleteResult, { mode: "deleted" }>> {
+    const category = await this.requireCategory(context, id);
+    const dependencyCount = await this.repository.countDependencies(
+      context,
+      id,
+    );
+
+    if (dependencyCount > 0) {
+      throw new DomainError(
+        "CONFLICT",
+        "Category has dependent records and cannot be deleted permanently.",
+        { details: { dependencyCount } },
+      );
+    }
+
+    await this.repository.delete(context, id);
+    await this.recordCategoryAudit(context, category, "categories.delete");
+
+    return { category, mode: "deleted" };
+  }
+
+  async getCategoryLifecycleState(context: RepositoryContext, id: CategoryId) {
+    const category = await this.requireCategory(context, id);
+    const [children, dependencyCount] = await Promise.all([
+      this.repository.listChildren(context, id),
+      this.repository.countDependencies(context, id),
+    ]);
+
+    return { category, children, dependencyCount };
+  }
+
   private async prepareMutation(
     context: RepositoryContext,
     input: CategoryCommandInput,
-    currentId?: CategoryId,
+    current?: CategoryRecord,
   ): Promise<CategoryMutation> {
     const mutation = parseCategoryMutation(input);
+    const currentId = current?.id;
 
     if (!mutation.parentId) {
       return mutation;
@@ -297,7 +355,7 @@ export class CategoryService {
 
     const parent = await this.requireCategory(context, mutation.parentId);
 
-    if (parent.archivedAt) {
+    if (parent.archivedAt && parent.id !== current?.parentId) {
       throw new DomainError("CONFLICT", "Parent category is archived.", {
         details: { field: "parentId" },
       });
@@ -365,36 +423,63 @@ export class CategoryService {
       return;
     }
 
-    await this.audit.record(
-      createAuditEvent({
-        action,
-        actor: { role: "user", userId: context.userId },
-        entity: {
-          id: category.id,
-          ownerUserId: category.userId,
-          type: "category",
-        },
-        metadata: {
-          categoryType: category.type,
-          parentId: category.parentId,
-          requestId: context.requestId ?? null,
-        },
-        occurredAt: this.now().toISOString(),
-        originType: "manual",
-        severity: "info",
-      }),
-    );
+    try {
+      await this.audit.record(
+        createAuditEvent({
+          action,
+          actor: { role: "user", userId: context.userId },
+          entity: {
+            id: category.id,
+            ownerUserId: category.userId,
+            type: "category",
+          },
+          metadata: {
+            categoryType: category.type,
+            parentId: category.parentId,
+            requestId: context.requestId ?? null,
+          },
+          occurredAt: this.now().toISOString(),
+          originType: "manual",
+          severity: "info",
+        }),
+      );
+    } catch (error) {
+      this.logger?.emit(
+        createStructuredLogEvent({
+          context: "CategoryService.recordCategoryAudit",
+          level: "error",
+          message: "Audit write failed after persisted category mutation.",
+          occurredAt: this.now().toISOString(),
+          requestId: context.requestId,
+          userId: context.userId,
+          metadata: {
+            action,
+            errorCode: error instanceof DomainError ? error.code : "UNEXPECTED",
+            resourceId: category.id,
+            resourceType: "category",
+          },
+        }),
+      );
+    }
   }
 }
 
 export function asCategoryId(value: string): CategoryId {
-  if (!value.trim()) {
+  const trimmed = value.trim();
+
+  if (!trimmed) {
     throw new DomainError("VALIDATION_FAILED", "CategoryId is required.", {
       details: { field: "categoryId" },
     });
   }
 
-  return value as CategoryId;
+  if (!isUuid(trimmed)) {
+    throw new DomainError("VALIDATION_FAILED", "CategoryId is invalid.", {
+      details: { field: "categoryId" },
+    });
+  }
+
+  return trimmed as CategoryId;
 }
 
 export function parseCategoryMutation(
@@ -504,7 +589,17 @@ function nullableCategoryIdFromInput(
     });
   }
 
-  return { ok: true, value: asCategoryId(value) };
+  const trimmed = value.trim();
+
+  if (!isUuid(trimmed)) {
+    return invalid({
+      code: "invalid_uuid",
+      message: "Expected a valid category id.",
+      path,
+    });
+  }
+
+  return { ok: true, value: trimmed as CategoryId };
 }
 
 function nullableIntegerFromInput(
@@ -517,10 +612,14 @@ function nullableIntegerFromInput(
 
   const parsed = typeof value === "number" ? value : Number(String(value));
 
-  if (!Number.isInteger(parsed) || parsed < 0) {
+  if (
+    !Number.isInteger(parsed) ||
+    parsed < -2147483648 ||
+    parsed > 2147483647
+  ) {
     return invalid({
       code: "invalid_integer",
-      message: "Expected a non-negative integer.",
+      message: "Expected a PostgreSQL integer value.",
       path,
     });
   }
@@ -563,4 +662,10 @@ function unwrapValidationResult<TValue>(result: ValidationResult<TValue>) {
   }
 
   return result.value;
+}
+
+function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    value,
+  );
 }

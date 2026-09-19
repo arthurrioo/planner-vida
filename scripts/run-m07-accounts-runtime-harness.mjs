@@ -273,6 +273,23 @@ select pg_temp.assert_eq(
   0
 );
 
+delete from public.accounts
+where id = '00000000-0000-4000-8000-000000000774';
+
+reset role;
+
+select pg_temp.assert_true(
+  'cross-user account delete is denied by RLS',
+  exists(
+    select 1
+    from public.accounts
+    where id = '00000000-0000-4000-8000-000000000774'
+  )
+);
+
+set role authenticated;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-000000000771';
+
 insert into public.accounts (
   user_id,
   name,
@@ -419,6 +436,74 @@ select pg_temp.assert_true(
     where id = '00000000-0000-4000-8000-000000000774'
       and institution = 'Banco B'
   )
+);
+
+set role authenticated;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-000000000771';
+
+do $$
+begin
+  begin
+    insert into public.audit_logs (
+      user_id,
+      actor_user_id,
+      actor_role,
+      action,
+      resource_type,
+      severity,
+      metadata
+    )
+    values (
+      '00000000-0000-4000-8000-000000000771',
+      '00000000-0000-4000-8000-000000000771',
+      'user',
+      'accounts.user_scoped_attempt',
+      'account',
+      'info',
+      '{}'::jsonb
+    );
+  exception when insufficient_privilege then
+    return;
+  end;
+  raise exception 'authenticated user-scoped audit_logs insert was not rejected';
+end;
+$$;
+
+reset role;
+
+set role service_role;
+
+insert into public.audit_logs (
+  user_id,
+  actor_user_id,
+  actor_role,
+  action,
+  resource_type,
+  resource_id,
+  severity,
+  metadata
+)
+values (
+  '00000000-0000-4000-8000-000000000771',
+  '00000000-0000-4000-8000-000000000771',
+  'user',
+  'accounts.privileged_runtime_probe',
+  'account',
+  '00000000-0000-4000-8000-000000000773',
+  'info',
+  '{"accountStatus":"active","accountType":"checking"}'::jsonb
+);
+
+reset role;
+
+select pg_temp.assert_eq(
+  'service_role can write account audit log',
+  (
+    select count(*)
+    from public.audit_logs
+    where action = 'accounts.privileged_runtime_probe'
+  ),
+  1
 );
 
 set role anon;

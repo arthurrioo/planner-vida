@@ -4,6 +4,7 @@ import {
   addMoney,
   assertOwnedByContext,
   createAuditEvent,
+  createStructuredLogEvent,
   DEFAULT_CURRENCY_CODE,
   DomainError,
   enumField,
@@ -17,6 +18,7 @@ import {
   type AccountStatus,
   type AccountType,
   type AuditService,
+  type Logger,
   type LocalDate,
   type Money,
   type RepositoryContext,
@@ -127,17 +129,20 @@ export type AccountRepository = Readonly<{
 
 export type AccountServiceOptions = Readonly<{
   audit?: AuditService;
+  logger?: Logger;
   now?: () => Date;
   repository: AccountRepository;
 }>;
 
 export class AccountService {
   private readonly audit?: AuditService;
+  private readonly logger?: Logger;
   private readonly now: () => Date;
   private readonly repository: AccountRepository;
 
   constructor(options: AccountServiceOptions) {
     this.audit = options.audit;
+    this.logger = options.logger;
     this.now = options.now ?? (() => new Date());
     this.repository = options.repository;
   }
@@ -394,25 +399,44 @@ export class AccountService {
       return;
     }
 
-    await this.audit.record(
-      createAuditEvent({
-        action,
-        actor: { role: "user", userId: context.userId },
-        entity: {
-          id: account.id,
-          ownerUserId: account.userId,
-          type: "account",
-        },
-        metadata: {
-          accountStatus: account.status,
-          accountType: account.type,
-          requestId: context.requestId ?? null,
-        },
-        occurredAt: this.now().toISOString(),
-        originType: "manual",
-        severity: "info",
-      }),
-    );
+    try {
+      await this.audit.record(
+        createAuditEvent({
+          action,
+          actor: { role: "user", userId: context.userId },
+          entity: {
+            id: account.id,
+            ownerUserId: account.userId,
+            type: "account",
+          },
+          metadata: {
+            accountStatus: account.status,
+            accountType: account.type,
+            requestId: context.requestId ?? null,
+          },
+          occurredAt: this.now().toISOString(),
+          originType: "manual",
+          severity: "info",
+        }),
+      );
+    } catch (error) {
+      this.logger?.emit(
+        createStructuredLogEvent({
+          context: "AccountService.recordAccountAudit",
+          level: "error",
+          message: "Audit write failed after persisted account mutation.",
+          occurredAt: this.now().toISOString(),
+          requestId: context.requestId,
+          userId: context.userId,
+          metadata: {
+            action,
+            errorCode: error instanceof DomainError ? error.code : "UNEXPECTED",
+            resourceId: account.id,
+            resourceType: "account",
+          },
+        }),
+      );
+    }
   }
 }
 

@@ -359,6 +359,110 @@ set role authenticated;
 set request.jwt.claim.sub = '00000000-0000-4000-8000-000000000881';
 
 update public.categories
+set name = 'Cross User Update Attempt'
+where id = '00000000-0000-4000-8000-000000000884';
+
+reset role;
+
+select pg_temp.assert_true(
+  'cross-user category update is denied by RLS',
+  exists(
+    select 1
+    from public.categories
+    where id = '00000000-0000-4000-8000-000000000884'
+      and name = 'Moradia'
+  )
+);
+
+set role authenticated;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-000000000881';
+
+delete from public.categories
+where id = '00000000-0000-4000-8000-000000000884';
+
+reset role;
+
+select pg_temp.assert_true(
+  'cross-user category delete is denied by RLS',
+  exists(
+    select 1
+    from public.categories
+    where id = '00000000-0000-4000-8000-000000000884'
+  )
+);
+
+set role authenticated;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-000000000881';
+
+do $$
+begin
+  begin
+    insert into public.audit_logs (
+      user_id,
+      actor_user_id,
+      actor_role,
+      action,
+      resource_type,
+      severity,
+      metadata
+    )
+    values (
+      '00000000-0000-4000-8000-000000000881',
+      '00000000-0000-4000-8000-000000000881',
+      'user',
+      'categories.user_scoped_attempt',
+      'category',
+      'info',
+      '{}'::jsonb
+    );
+  exception when insufficient_privilege then
+    return;
+  end;
+  raise exception 'authenticated user-scoped audit_logs insert was not rejected';
+end;
+$$;
+
+reset role;
+
+set role service_role;
+
+insert into public.audit_logs (
+  user_id,
+  actor_user_id,
+  actor_role,
+  action,
+  resource_type,
+  resource_id,
+  severity,
+  metadata
+)
+values (
+  '00000000-0000-4000-8000-000000000881',
+  '00000000-0000-4000-8000-000000000881',
+  'user',
+  'categories.privileged_runtime_probe',
+  'category',
+  '00000000-0000-4000-8000-000000000883',
+  'info',
+  '{"categoryType":"fixed_expense"}'::jsonb
+);
+
+reset role;
+
+select pg_temp.assert_eq(
+  'service_role can write category audit log',
+  (
+    select count(*)
+    from public.audit_logs
+    where action = 'categories.privileged_runtime_probe'
+  ),
+  1
+);
+
+set role authenticated;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-000000000881';
+
+update public.categories
 set archived_at = now()
 where id = '00000000-0000-4000-8000-000000000883';
 
@@ -437,6 +541,34 @@ select pg_temp.assert_true(
     from public.categories
     where id = '00000000-0000-4000-8000-000000000886'
   )
+);
+
+insert into public.categories (
+  id,
+  user_id,
+  name,
+  normalized_name,
+  type
+)
+values (
+  '00000000-0000-4000-8000-000000000887',
+  '00000000-0000-4000-8000-000000000881',
+  'Temporary Delete',
+  'temporary-delete',
+  'income'
+);
+
+delete from public.categories
+where id = '00000000-0000-4000-8000-000000000887';
+
+select pg_temp.assert_eq(
+  'owner can hard-delete unreferenced own category',
+  (
+    select count(*)
+    from public.categories
+    where id = '00000000-0000-4000-8000-000000000887'
+  ),
+  0
 );
 
 set role anon;

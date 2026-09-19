@@ -172,6 +172,9 @@ export async function deleteOrArchiveCategoryAction(categoryId: string) {
   const detailPath = `/app/financeiro/categorias/${categoryId}`;
   const context = await getCategoryActionContext(detailPath);
   const service = await createCategoryService();
+  let redirectPath = detailPath;
+  let redirectType: "error" | "message" = "message";
+  let redirectMessage = "Categoria possui vinculos e foi arquivada.";
 
   try {
     const result = await service.deleteOrArchiveCategory(
@@ -180,20 +183,34 @@ export async function deleteOrArchiveCategoryAction(categoryId: string) {
     );
 
     if (result.mode === "deleted") {
-      redirectWithMessage(
-        "/app/financeiro/categorias",
-        "message",
-        "Categoria excluida permanentemente.",
-      );
+      redirectPath = "/app/financeiro/categorias";
+      redirectMessage = "Categoria excluida permanentemente.";
     }
-
-    redirectWithMessage(
-      detailPath,
-      "message",
-      "Categoria possui vinculos e foi arquivada.",
-    );
   } catch (error) {
     const publicError = toPublicError(error);
-    redirectWithMessage(detailPath, "error", publicError.message);
+    redirectType = "error";
+    redirectMessage = publicError.message;
   }
+
+  redirectWithMessage(redirectPath, redirectType, redirectMessage);
+}
+
+export async function deleteCategoryAction(categoryId: string) {
+  const detailPath = `/app/financeiro/categorias/${categoryId}`;
+  const context = await getCategoryActionContext(detailPath);
+  const service = await createCategoryService();
+  let redirectPath = "/app/financeiro/categorias";
+  let redirectType: "error" | "message" = "message";
+  let redirectMessage = "Categoria excluida permanentemente.";
+
+  try {
+    await service.deleteCategoryIfSafe(context, asCategoryId(categoryId));
+  } catch (error) {
+    const publicError = toPublicError(error);
+    redirectPath = detailPath;
+    redirectType = "error";
+    redirectMessage = publicError.message;
+  }
+
+  redirectWithMessage(redirectPath, redirectType, redirectMessage);
 }

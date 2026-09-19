@@ -211,6 +211,10 @@ export async function deleteAccountAction(accountId: string) {
   const detailPath = `/app/financeiro/contas/${accountId}`;
   const context = await getAccountActionContext(detailPath);
   const service = await createAccountService();
+  let redirectPath = detailPath;
+  let redirectType: "error" | "message" = "error";
+  let redirectMessage =
+    "Conta possui registros vinculados e nao pode ser excluida permanentemente.";
 
   try {
     const result = await service.deleteAccountIfSafe(
@@ -219,20 +223,15 @@ export async function deleteAccountAction(accountId: string) {
     );
 
     if (result.mode === "deleted") {
-      redirectWithMessage(
-        "/app/financeiro/contas",
-        "message",
-        "Conta excluida permanentemente.",
-      );
+      redirectPath = "/app/financeiro/contas";
+      redirectType = "message";
+      redirectMessage = "Conta excluida permanentemente.";
     }
-
-    redirectWithMessage(
-      detailPath,
-      "error",
-      "Conta possui registros vinculados e nao pode ser excluida permanentemente.",
-    );
   } catch (error) {
     const publicError = toPublicError(error);
-    redirectWithMessage(detailPath, "error", publicError.message);
+    redirectType = "error";
+    redirectMessage = publicError.message;
   }
+
+  redirectWithMessage(redirectPath, redirectType, redirectMessage);
 }

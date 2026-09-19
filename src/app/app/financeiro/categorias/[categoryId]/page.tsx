@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 
 import {
   archiveCategoryAction,
-  deleteOrArchiveCategoryAction,
+  deleteCategoryAction,
   updateCategoryAction,
 } from "../actions";
 import { createCategoryService } from "@/application/categories/category-service";
@@ -14,7 +14,7 @@ import { ModulePage } from "@/components/app/module-page";
 import { ProtectedAppShell } from "@/components/app/protected-app-shell";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ResponsiveTable } from "@/components/ui/responsive-table";
-import { asCategoryId } from "@/domain/categories";
+import { asCategoryId, type CategoryRecord } from "@/domain/categories";
 import { asUserId, DomainError, getEnumLabel } from "@/domain/shared";
 import { getAuthenticatedSession } from "@/lib/auth/session";
 
@@ -33,12 +33,23 @@ export default async function CategoryDetailPage({
   const { user } = await getAuthenticatedSession(path);
   const context = { userId: asUserId(user.id) };
   const service = await createCategoryService();
-  let category;
+  let category: CategoryRecord;
+  let dependencyCount = 0;
+  let categoryChildren: readonly CategoryRecord[] = [];
 
   try {
-    category = await service.getCategory(context, asCategoryId(categoryId));
+    const lifecycle = await service.getCategoryLifecycleState(
+      context,
+      asCategoryId(categoryId),
+    );
+    category = lifecycle.category;
+    dependencyCount = lifecycle.dependencyCount;
+    categoryChildren = lifecycle.children;
   } catch (error) {
-    if (error instanceof DomainError && error.code === "NOT_FOUND") {
+    if (
+      error instanceof DomainError &&
+      (error.code === "NOT_FOUND" || error.code === "VALIDATION_FAILED")
+    ) {
       notFound();
     }
 
@@ -47,26 +58,23 @@ export default async function CategoryDetailPage({
 
   const categoryTree = await service.listCategoryTree(context);
   const rootCategories = categoryTree.filter(
-    (item) => item.parentId === null && item.archivedAt === null,
+    (item) =>
+      item.parentId === null &&
+      (item.archivedAt === null || item.id === category.parentId),
   );
-  const dependencyCount =
-    categoryTree.find((item) => item.id === category.id)?.dependencyCount ?? 0;
-  const childrenRows =
-    categoryTree
-      .find((item) => item.id === category.id)
-      ?.subcategories.map((subcategory) => ({
-        id: subcategory.id,
-        name: (
-          <Link
-            className="text-primary font-semibold hover:underline"
-            href={`/app/financeiro/categorias/${subcategory.id}`}
-          >
-            {subcategory.name}
-          </Link>
-        ),
-        status: subcategory.archivedAt ? "Arquivada" : "Ativa",
-        type: getEnumLabel("category_type", subcategory.type),
-      })) ?? [];
+  const childrenRows = categoryChildren.map((subcategory) => ({
+    id: subcategory.id,
+    name: (
+      <Link
+        className="text-primary font-semibold hover:underline"
+        href={`/app/financeiro/categorias/${subcategory.id}`}
+      >
+        {subcategory.name}
+      </Link>
+    ),
+    status: subcategory.archivedAt ? "Arquivada" : "Ativa",
+    type: getEnumLabel("category_type", subcategory.type),
+  }));
 
   return (
     <ProtectedAppShell nextPath={path}>
@@ -124,10 +132,7 @@ export default async function CategoryDetailPage({
               <CategoryLifecycleActions
                 archiveAction={archiveCategoryAction.bind(null, category.id)}
                 archivedAt={category.archivedAt}
-                deleteOrArchiveAction={deleteOrArchiveCategoryAction.bind(
-                  null,
-                  category.id,
-                )}
+                deleteAction={deleteCategoryAction.bind(null, category.id)}
                 dependencyCount={dependencyCount}
               />
             </CardContent>
