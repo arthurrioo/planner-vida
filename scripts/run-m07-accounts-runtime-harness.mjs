@@ -247,6 +247,119 @@ select pg_temp.assert_eq(
   1
 );
 
+update public.accounts
+set institution = 'Banco A Atualizado'
+where id = '00000000-0000-4000-8000-000000000773';
+
+select pg_temp.assert_true(
+  'own positive account update is allowed',
+  exists(
+    select 1
+    from public.accounts
+    where id = '00000000-0000-4000-8000-000000000773'
+      and institution = 'Banco A Atualizado'
+  )
+);
+
+with attempted_cross_user_update as (
+  update public.accounts
+  set institution = 'Cross User Leak'
+  where id = '00000000-0000-4000-8000-000000000774'
+  returning id
+)
+select pg_temp.assert_eq(
+  'cross-user account update affects zero rows',
+  (select count(*) from attempted_cross_user_update),
+  0
+);
+
+insert into public.accounts (
+  user_id,
+  name,
+  normalized_name,
+  type,
+  opening_balance,
+  opening_balance_date
+)
+values (
+  '00000000-0000-4000-8000-000000000771',
+  'Conta Legada Negativa',
+  'conta legada negativa',
+  'benefit',
+  -10.0000,
+  '2026-09-15'
+);
+
+select pg_temp.assert_true(
+  'negative opening balance is accepted as snapshot',
+  exists(
+    select 1
+    from public.accounts
+    where user_id = '00000000-0000-4000-8000-000000000771'
+      and normalized_name = 'conta legada negativa'
+      and opening_balance = -10.0000
+  )
+);
+
+do $$
+begin
+  begin
+    insert into public.accounts (
+      user_id,
+      name,
+      normalized_name,
+      type,
+      opening_balance,
+      opening_balance_date,
+      overdraft_limit
+    )
+    values (
+      '00000000-0000-4000-8000-000000000771',
+      'Cheque Especial Invalido',
+      'cheque especial invalido',
+      'checking',
+      0,
+      '2026-09-15',
+      -1
+    );
+  exception when check_violation then
+    return;
+  end;
+  raise exception 'negative overdraft_limit was not rejected';
+end;
+$$;
+
+insert into public.accounts (
+  id,
+  user_id,
+  name,
+  normalized_name,
+  type,
+  opening_balance,
+  opening_balance_date
+)
+values (
+  '00000000-0000-4000-8000-000000000775',
+  '00000000-0000-4000-8000-000000000771',
+  'Conta Sem Dependencias',
+  'conta sem dependencias',
+  'wallet',
+  0,
+  '2026-09-15'
+);
+
+delete from public.accounts
+where id = '00000000-0000-4000-8000-000000000775';
+
+select pg_temp.assert_true(
+  'unreferenced own account hard delete is allowed',
+  not exists(
+    select 1
+    from public.accounts
+    where id = '00000000-0000-4000-8000-000000000775'
+  )
+);
+
 do $$
 begin
   begin
@@ -297,6 +410,47 @@ select pg_temp.assert_true(
       and user_id = '00000000-0000-4000-8000-000000000771'
   )
 );
+
+select pg_temp.assert_true(
+  'cross-user update did not change user B account',
+  exists(
+    select 1
+    from public.accounts
+    where id = '00000000-0000-4000-8000-000000000774'
+      and institution = 'Banco B'
+  )
+);
+
+set role anon;
+set request.jwt.claim.sub = '';
+
+do $$
+begin
+  begin
+    insert into public.accounts (
+      user_id,
+      name,
+      normalized_name,
+      type,
+      opening_balance,
+      opening_balance_date
+    )
+    values (
+      '00000000-0000-4000-8000-000000000771',
+      'Anon Attempt',
+      'anon-attempt',
+      'checking',
+      0,
+      '2026-09-15'
+    );
+  exception when insufficient_privilege then
+    return;
+  end;
+  raise exception 'anon account insert was not rejected';
+end;
+$$;
+
+reset role;
 
 set role authenticated;
 set request.jwt.claim.sub = '00000000-0000-4000-8000-000000000771';

@@ -4,13 +4,15 @@ import { notFound } from "next/navigation";
 import {
   archiveAccountAction,
   closeAccountAction,
+  deleteAccountAction,
+  reactivateAccountAction,
   updateAccountAction,
 } from "../actions";
 import { AccountForm } from "@/components/accounts/account-form";
+import { AccountLifecycleActions } from "@/components/accounts/account-lifecycle-actions";
 import { AccountStatusMessage } from "@/components/accounts/account-status-message";
 import { ModulePage } from "@/components/app/module-page";
 import { ProtectedAppShell } from "@/components/app/protected-app-shell";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { asAccountId } from "@/domain/accounts";
 import { asUserId, DomainError, getEnumLabel } from "@/domain/shared";
@@ -52,6 +54,8 @@ export default async function AccountDetailPage({
   const updateAction = updateAccountAction.bind(null, account.id);
   const archiveAction = archiveAccountAction.bind(null, account.id);
   const closeAction = closeAccountAction.bind(null, account.id);
+  const deleteAction = deleteAccountAction.bind(null, account.id);
+  const reactivateAction = reactivateAccountAction.bind(null, account.id);
 
   return (
     <ProtectedAppShell nextPath={nextPath}>
@@ -104,32 +108,20 @@ export default async function AccountDetailPage({
                 </div>
               </dl>
 
-              <div className="mt-5 flex flex-wrap gap-2">
-                <form action={archiveAction}>
-                  <Button
-                    disabled={account.status === "archived"}
-                    type="submit"
-                    variant="secondary"
-                  >
-                    Arquivar
-                  </Button>
-                </form>
-                <form action={closeAction}>
-                  <Button
-                    disabled={account.status === "closed"}
-                    type="submit"
-                    variant="secondary"
-                  >
-                    Encerrar
-                  </Button>
-                </form>
-                <Link
-                  className="hover:bg-muted inline-flex h-10 items-center justify-center rounded-md px-4 text-sm font-medium"
-                  href="/app/financeiro/contas"
-                >
-                  Voltar
-                </Link>
-              </div>
+              <AccountLifecycleActions
+                account={account}
+                archiveAction={archiveAction}
+                closeAction={closeAction}
+                deleteAction={deleteAction}
+                reactivateAction={reactivateAction}
+              />
+
+              <Link
+                className="hover:bg-muted mt-5 inline-flex h-10 items-center justify-center rounded-md px-4 text-sm font-medium"
+                href="/app/financeiro/contas"
+              >
+                Voltar
+              </Link>
             </CardContent>
           </Card>
 
@@ -138,11 +130,18 @@ export default async function AccountDetailPage({
               <CardTitle>Cadastro</CardTitle>
             </CardHeader>
             <CardContent>
-              <AccountForm
-                account={account}
-                action={updateAction}
-                submitLabel="Salvar alteracoes"
-              />
+              {account.status === "closed" ? (
+                <p className="text-muted-foreground text-sm leading-6">
+                  Conta encerrada. Os campos cadastrais ficam somente para
+                  leitura na Phase 1.
+                </p>
+              ) : (
+                <AccountForm
+                  account={account}
+                  action={updateAction}
+                  submitLabel="Salvar alteracoes"
+                />
+              )}
             </CardContent>
           </Card>
         </div>

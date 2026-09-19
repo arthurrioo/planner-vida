@@ -60,6 +60,22 @@ type InvoicePaymentRow = Readonly<{
   principal_amount: string | number;
 }>;
 
+export const ACCOUNT_DEPENDENCY_REFERENCES = [
+  { column: "account_id", table: "annual_obligations" },
+  { column: "linked_account_id", table: "assets" },
+  { column: "account_id", table: "credit_cards" },
+  { column: "account_id", table: "events" },
+  { column: "account_id", table: "financial_commitments" },
+  { column: "account_id", table: "financial_goals" },
+  { column: "account_id", table: "installment_plans" },
+  { column: "account_id", table: "invoice_payments" },
+  { column: "linked_account_id", table: "liabilities" },
+  { column: "account_id", table: "subscriptions" },
+  { column: "account_id", table: "transactions" },
+  { column: "destination_account_id", table: "transfers" },
+  { column: "source_account_id", table: "transfers" },
+] as const;
+
 export class SupabaseAccountRepository implements AccountRepository {
   constructor(private readonly supabase: SupabaseClient) {}
 
@@ -183,17 +199,11 @@ export class SupabaseAccountRepository implements AccountRepository {
   }
 
   async countDependencies(context: RepositoryContext, id: AccountId) {
-    const counts = await Promise.all([
-      this.countBy("transactions", context, "account_id", id),
-      this.countBy("transfers", context, "source_account_id", id),
-      this.countBy("transfers", context, "destination_account_id", id),
-      this.countBy("credit_cards", context, "account_id", id),
-      this.countBy("installment_plans", context, "account_id", id),
-      this.countBy("invoice_payments", context, "account_id", id),
-      this.countBy("financial_commitments", context, "account_id", id),
-      this.countBy("events", context, "account_id", id),
-      this.countBy("financial_goals", context, "account_id", id),
-    ]);
+    const counts = await Promise.all(
+      ACCOUNT_DEPENDENCY_REFERENCES.map((reference) =>
+        this.countBy(reference.table, context, reference.column, id),
+      ),
+    );
 
     return counts.reduce((total, count) => total + count, 0);
   }
@@ -399,7 +409,9 @@ function mapAccountRow(row: AccountRow): AccountRecord {
     institution: row.institution,
     name: row.name,
     normalizedName: row.normalized_name,
-    openingBalance: parseMoney(row.opening_balance.toString()),
+    openingBalance: parseMoney(row.opening_balance.toString(), {
+      allowNegative: true,
+    }),
     openingBalanceDate: parseLocalDate(row.opening_balance_date),
     overdraftLimit: parseMoney(row.overdraft_limit.toString()),
     status: row.status,

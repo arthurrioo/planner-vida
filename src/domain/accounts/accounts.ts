@@ -51,6 +51,17 @@ export type AccountWithBalance = AccountRecord &
     dependencyCount: number;
   }>;
 
+export type AccountLifecycleAction =
+  "archive" | "close" | "delete" | "reactivate" | "update";
+
+export type AccountDeleteResult =
+  | Readonly<{ account: AccountRecord; mode: "deleted" }>
+  | Readonly<{
+      account: AccountRecord;
+      dependencyCount: number;
+      mode: "blocked";
+    }>;
+
 export type AccountCommandInput = Readonly<{
   description?: unknown;
   institution?: unknown;
@@ -141,6 +152,18 @@ export class AccountService {
     );
   }
 
+  async listSelectableAccounts(
+    context: RepositoryContext,
+    options: Readonly<{ includeStatuses?: readonly AccountStatus[] }> = {},
+  ) {
+    const includeStatuses = options.includeStatuses ?? ["active"];
+    const accounts = await this.listAccounts(context);
+
+    return accounts.filter((account) =>
+      includeStatuses.includes(account.status),
+    );
+  }
+
   async getAccount(context: RepositoryContext, id: AccountId) {
     const account = await this.requireAccount(context, id);
 
@@ -163,12 +186,18 @@ export class AccountService {
     input: AccountCommandInput,
   ) {
     const existing = await this.requireAccount(context, id);
+
+    this.assertLifecycleAllowed(existing, "update");
+
     const mutation = parseAccountMutation(input);
-    await this.assertNoActiveNameConflict(
-      context,
-      mutation.normalizedName,
-      existing.id,
-    );
+
+    if (existing.status === "active") {
+      await this.assertNoActiveNameConflict(
+        context,
+        mutation.normalizedName,
+        existing.id,
+      );
+    }
 
     const account = await this.repository.update(context, id, mutation);
     await this.recordAccountAudit(context, account, "accounts.update");
@@ -183,6 +212,8 @@ export class AccountService {
       return account;
     }
 
+    this.assertLifecycleAllowed(account, "archive");
+
     const archived = await this.repository.updateStatus(
       context,
       id,
@@ -194,12 +225,39 @@ export class AccountService {
     return archived;
   }
 
+  async reactivateAccount(context: RepositoryContext, id: AccountId) {
+    const account = await this.requireAccount(context, id);
+
+    if (account.status === "active") {
+      return account;
+    }
+
+    this.assertLifecycleAllowed(account, "reactivate");
+    await this.assertNoActiveNameConflict(
+      context,
+      account.normalizedName,
+      account.id,
+    );
+
+    const reactivated = await this.repository.updateStatus(
+      context,
+      id,
+      "active",
+      null,
+    );
+    await this.recordAccountAudit(context, reactivated, "accounts.reactivate");
+
+    return reactivated;
+  }
+
   async closeAccount(context: RepositoryContext, id: AccountId) {
     const account = await this.requireAccount(context, id);
 
     if (account.status === "closed") {
       return account;
     }
+
+    this.assertLifecycleAllowed(account, "close");
 
     const closed = await this.repository.updateStatus(
       context,
@@ -210,6 +268,26 @@ export class AccountService {
     await this.recordAccountAudit(context, closed, "accounts.close");
 
     return closed;
+  }
+
+  async deleteAccountIfSafe(
+    context: RepositoryContext,
+    id: AccountId,
+  ): Promise<AccountDeleteResult> {
+    const account = await this.requireAccount(context, id);
+    const dependencyCount = await this.repository.countDependencies(
+      context,
+      id,
+    );
+
+    if (dependencyCount > 0) {
+      return { account, dependencyCount, mode: "blocked" };
+    }
+
+    await this.repository.delete(context, id);
+    await this.recordAccountAudit(context, account, "accounts.delete");
+
+    return { account, mode: "deleted" };
   }
 
   async deleteOrArchiveAccount(context: RepositoryContext, id: AccountId) {
@@ -289,6 +367,24 @@ export class AccountService {
     }
   }
 
+  private assertLifecycleAllowed(
+    account: AccountRecord,
+    action: AccountLifecycleAction,
+  ) {
+    const allowed = isLifecycleActionAllowed(account.status, action);
+
+    if (allowed) {
+      return;
+    }
+
+    throw new DomainError("CONFLICT", lifecycleErrorMessage(action), {
+      details: {
+        action,
+        status: account.status,
+      },
+    });
+  }
+
   private async recordAccountAudit(
     context: RepositoryContext,
     account: AccountRecord,
@@ -350,7 +446,7 @@ export function parseAccountMutation(
   );
   const typeResult = enumField(accountTypes)(input.type, "type");
   const openingBalanceResult = moneyField({
-    allowNegative: false,
+    allowNegative: true,
   })(input.openingBalance, "openingBalance");
   const openingBalanceDateResult = localDateField()(
     input.openingBalanceDate,
@@ -406,6 +502,48 @@ export function parseAccountMutation(
     overdraftLimit,
     type: accountType,
   };
+}
+
+export function isLifecycleActionAllowed(
+  status: AccountStatus,
+  action: AccountLifecycleAction,
+) {
+  if (action === "update") {
+    return status !== "closed";
+  }
+
+  if (action === "archive") {
+    return status === "active" || status === "archived";
+  }
+
+  if (action === "reactivate") {
+    return status === "active" || status === "archived";
+  }
+
+  if (action === "close") {
+    return status === "active" || status === "archived" || status === "closed";
+  }
+
+  if (action === "delete") {
+    return true;
+  }
+
+  return false;
+}
+
+function lifecycleErrorMessage(action: AccountLifecycleAction) {
+  switch (action) {
+    case "archive":
+      return "Closed accounts cannot be archived.";
+    case "close":
+      return "Account cannot be closed from its current status.";
+    case "delete":
+      return "Account cannot be deleted from its current status.";
+    case "reactivate":
+      return "Closed accounts cannot be reactivated.";
+    case "update":
+      return "Closed accounts are read-only.";
+  }
 }
 
 export function calculateAccountBalance(
