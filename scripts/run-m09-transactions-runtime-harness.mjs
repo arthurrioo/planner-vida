@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 
 const repoRoot = process.cwd();
 const m03MigrationPath = path.join(
@@ -16,6 +16,12 @@ const m04MigrationPath = path.join(
   "supabase",
   "migrations",
   "20260915000200_m04_auth_profiles_authorization_rls.sql",
+);
+const m09MigrationPath = path.join(
+  repoRoot,
+  "supabase",
+  "migrations",
+  "20260920000100_m09_transactions_atomic_rpc.sql",
 );
 const seedPath = path.join(repoRoot, "supabase", "seed.sql");
 
@@ -79,6 +85,136 @@ function psqlFile(port, database, filePath, options = {}) {
       filePath,
     ],
     { capture: Boolean(options.capture) },
+  );
+}
+
+function runPsqlFileAsync(port, database, filePath) {
+  return new Promise((resolve) => {
+    const child = spawn(
+      "psql",
+      [
+        "--no-psqlrc",
+        "--set",
+        "ON_ERROR_STOP=1",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        String(port),
+        "--dbname",
+        database,
+        "--file",
+        filePath,
+      ],
+      {
+        cwd: repoRoot,
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+    const stdout = [];
+    const stderr = [];
+
+    child.stdout.on("data", (chunk) => stdout.push(chunk));
+    child.stderr.on("data", (chunk) => stderr.push(chunk));
+    child.on("close", (status) => {
+      resolve({
+        output: Buffer.concat([...stdout, ...stderr]).toString("utf8"),
+        status,
+      });
+    });
+  });
+}
+
+async function runConcurrentReversalCheck(port, database, tempDir) {
+  psql(
+    port,
+    database,
+    `
+set role authenticated;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-000000000991';
+
+insert into public.transactions (
+  id,
+  user_id,
+  transaction_type,
+  status,
+  description,
+  amount,
+  transaction_date,
+  competence_date,
+  competence_month,
+  category_id,
+  payment_method,
+  account_id,
+  posted_at
+)
+values (
+  '00000000-0000-4000-8000-000000001008',
+  '00000000-0000-4000-8000-000000000991',
+  'expense',
+  'posted',
+  'Runtime concurrent reversal original',
+  10,
+  '2026-09-20',
+  '2026-09-20',
+  '2026-09-01',
+  '00000000-0000-4000-8000-000000000997',
+  'pix',
+  '00000000-0000-4000-8000-000000000993',
+  now()
+);
+`,
+    { name: "concurrent-setup", tempDir },
+  );
+
+  const sql = `
+set role authenticated;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-000000000991';
+select public.reverse_transaction(
+  '00000000-0000-4000-8000-000000001008',
+  'runtime concurrent reversal'
+);
+`;
+  const firstPath = path.join(tempDir, "concurrent-reversal-a.sql");
+  const secondPath = path.join(tempDir, "concurrent-reversal-b.sql");
+  fs.writeFileSync(firstPath, sql);
+  fs.writeFileSync(secondPath, sql);
+
+  const results = await Promise.all([
+    runPsqlFileAsync(port, database, firstPath),
+    runPsqlFileAsync(port, database, secondPath),
+  ]);
+  const successes = results.filter((result) => result.status === 0);
+  const failures = results.filter((result) => result.status !== 0);
+
+  if (successes.length !== 1 || failures.length !== 1) {
+    throw new Error(
+      `Expected one concurrent reversal success and one conflict. Results:\n${results
+        .map((result) => `status=${result.status}\n${result.output}`)
+        .join("\n---\n")}`,
+    );
+  }
+
+  psql(
+    port,
+    database,
+    `
+do $$
+declare
+  actual numeric;
+begin
+  select count(*)
+  into actual
+  from public.transactions
+  where reversal_of_transaction_id = '00000000-0000-4000-8000-000000001008'
+    and status = 'reversed';
+
+  if actual <> 1 then
+    raise exception 'M09 runtime assertion failed: concurrent reversal creates one lineage row, got %', actual;
+  end if;
+end;
+$$;
+`,
+    { name: "concurrent-assert", tempDir },
   );
 }
 
@@ -564,6 +700,325 @@ select pg_temp.assert_true(
   )
 );
 
+update public.transactions
+set description = 'Own update baseline'
+where id = '00000000-0000-4000-8000-000000001001';
+
+select pg_temp.assert_true(
+  'owner can update own transaction baseline',
+  exists(
+    select 1
+    from public.transactions
+    where id = '00000000-0000-4000-8000-000000001001'
+      and description = 'Own update baseline'
+  )
+);
+
+do $$
+begin
+  begin
+    update public.transactions
+    set user_id = '00000000-0000-4000-8000-000000000992'
+    where id = '00000000-0000-4000-8000-000000001001';
+  exception when insufficient_privilege then
+    return;
+  end;
+  raise exception 'owner reassignment was not rejected';
+end;
+$$;
+
+insert into public.transactions (
+  id,
+  user_id,
+  transaction_type,
+  status,
+  description,
+  amount,
+  transaction_date,
+  competence_date,
+  competence_month,
+  category_id,
+  payment_method,
+  account_id,
+  posted_at
+)
+values (
+  '00000000-0000-4000-8000-000000001005',
+  '00000000-0000-4000-8000-000000000991',
+  'expense',
+  'posted',
+  'Runtime reversal original',
+  25,
+  '2026-09-20',
+  '2026-09-20',
+  '2026-09-01',
+  '00000000-0000-4000-8000-000000000997',
+  'pix',
+  '00000000-0000-4000-8000-000000000993',
+  now()
+);
+
+select public.reverse_transaction(
+  '00000000-0000-4000-8000-000000001005',
+  'runtime reversal'
+);
+
+select pg_temp.assert_true(
+  'reversal RPC marks original reversed',
+  exists(
+    select 1
+    from public.transactions
+    where id = '00000000-0000-4000-8000-000000001005'
+      and status = 'reversed'
+      and reversed_by_transaction_id is not null
+  )
+);
+
+select pg_temp.assert_eq(
+  'reversal RPC creates exactly one reversed lineage row',
+  (
+    select count(*)
+    from public.transactions
+    where reversal_of_transaction_id = '00000000-0000-4000-8000-000000001005'
+      and status = 'reversed'
+  ),
+  1
+);
+
+do $$
+begin
+  begin
+    perform public.reverse_transaction(
+      '00000000-0000-4000-8000-000000001005',
+      'runtime duplicate reversal'
+    );
+  exception when raise_exception then
+    return;
+  end;
+  raise exception 'duplicate reversal was not rejected';
+end;
+$$;
+
+select pg_temp.assert_eq(
+  'duplicate reversal guard preserves one lineage row',
+  (
+    select count(*)
+    from public.transactions
+    where reversal_of_transaction_id = '00000000-0000-4000-8000-000000001005'
+  ),
+  1
+);
+
+insert into public.transactions (
+  id,
+  user_id,
+  transaction_type,
+  status,
+  description,
+  amount,
+  transaction_date,
+  competence_date,
+  competence_month,
+  category_id,
+  payment_method,
+  account_id,
+  posted_at
+)
+values (
+  '00000000-0000-4000-8000-000000001006',
+  '00000000-0000-4000-8000-000000000991',
+  'expense',
+  'posted',
+  'Runtime correction original',
+  40,
+  '2026-09-20',
+  '2026-09-20',
+  '2026-09-01',
+  '00000000-0000-4000-8000-000000000997',
+  'pix',
+  '00000000-0000-4000-8000-000000000993',
+  now()
+);
+
+select public.correct_transaction(
+  '00000000-0000-4000-8000-000000001006',
+  'runtime correction',
+  jsonb_build_object(
+    'account_id', '00000000-0000-4000-8000-000000000993',
+    'amount', 35,
+    'category_id', '00000000-0000-4000-8000-000000000997',
+    'competence_date', '2026-09-20',
+    'competence_month', '2026-09-01',
+    'credit_card_id', null,
+    'description', 'Runtime correction replacement',
+    'payment_method', 'pix',
+    'subcategory_id', null,
+    'transaction_date', '2026-09-21',
+    'transaction_type', 'expense',
+    'user_id', '00000000-0000-4000-8000-000000000992'
+  )
+);
+
+select pg_temp.assert_true(
+  'correction RPC marks original reversed',
+  exists(
+    select 1
+    from public.transactions
+    where id = '00000000-0000-4000-8000-000000001006'
+      and status = 'reversed'
+      and reversed_by_transaction_id is not null
+  )
+);
+
+select pg_temp.assert_eq(
+  'correction RPC creates exactly one reversed lineage row',
+  (
+    select count(*)
+    from public.transactions
+    where reversal_of_transaction_id = '00000000-0000-4000-8000-000000001006'
+      and status = 'reversed'
+  ),
+  1
+);
+
+select pg_temp.assert_true(
+  'correction RPC creates posted replacement owned by authenticated user',
+  exists(
+    select 1
+    from public.transactions
+    where description = 'Runtime correction replacement'
+      and status = 'posted'
+      and user_id = '00000000-0000-4000-8000-000000000991'
+      and amount = 35
+  )
+);
+
+reset role;
+
+create function pg_temp.fail_m09_replacement_insert()
+returns trigger
+language plpgsql
+as $$
+begin
+  if new.description = 'Runtime replacement failure' then
+    raise exception 'synthetic replacement failure';
+  end if;
+  return new;
+end;
+$$;
+
+create trigger m09_fail_replacement_insert
+before insert on public.transactions
+for each row
+execute function pg_temp.fail_m09_replacement_insert();
+
+set role authenticated;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-000000000991';
+
+insert into public.transactions (
+  id,
+  user_id,
+  transaction_type,
+  status,
+  description,
+  amount,
+  transaction_date,
+  competence_date,
+  competence_month,
+  category_id,
+  payment_method,
+  account_id,
+  posted_at
+)
+values (
+  '00000000-0000-4000-8000-000000001007',
+  '00000000-0000-4000-8000-000000000991',
+  'expense',
+  'posted',
+  'Runtime rollback original',
+  45,
+  '2026-09-20',
+  '2026-09-20',
+  '2026-09-01',
+  '00000000-0000-4000-8000-000000000997',
+  'pix',
+  '00000000-0000-4000-8000-000000000993',
+  now()
+);
+
+do $$
+begin
+  begin
+    perform public.correct_transaction(
+      '00000000-0000-4000-8000-000000001007',
+      'runtime rollback',
+      jsonb_build_object(
+        'account_id', '00000000-0000-4000-8000-000000000993',
+        'amount', 30,
+        'category_id', '00000000-0000-4000-8000-000000000997',
+        'competence_date', '2026-09-20',
+        'competence_month', '2026-09-01',
+        'credit_card_id', null,
+        'description', 'Runtime replacement failure',
+        'payment_method', 'pix',
+        'subcategory_id', null,
+        'transaction_date', '2026-09-21',
+        'transaction_type', 'expense'
+      )
+    );
+  exception when others then
+    return;
+  end;
+  raise exception 'correction failure did not raise';
+end;
+$$;
+
+reset role;
+drop trigger m09_fail_replacement_insert on public.transactions;
+set role authenticated;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-000000000991';
+
+select pg_temp.assert_true(
+  'correction rollback keeps original posted',
+  exists(
+    select 1
+    from public.transactions
+    where id = '00000000-0000-4000-8000-000000001007'
+      and status = 'posted'
+      and reversed_by_transaction_id is null
+  )
+);
+
+select pg_temp.assert_eq(
+  'correction rollback leaves no reversal row',
+  (
+    select count(*)
+    from public.transactions
+    where reversal_of_transaction_id = '00000000-0000-4000-8000-000000001007'
+  ),
+  0
+);
+
+select pg_temp.assert_eq(
+  'account balance after void reverse correct and rollback uses persisted states',
+  (
+    select coalesce(sum(
+      case
+        when transaction_type = 'income' then amount
+        when transaction_type in ('expense', 'investment') then -amount
+        else 0
+      end
+    ), 0)
+    from public.transactions
+    where user_id = '00000000-0000-4000-8000-000000000991'
+      and account_id = '00000000-0000-4000-8000-000000000993'
+      and status = 'posted'
+      and payment_method <> 'credit_card'
+      and credit_card_id is null
+  ),
+  220
+);
+
 set request.jwt.claim.sub = '00000000-0000-4000-8000-000000000992';
 
 select pg_temp.assert_eq(
@@ -593,6 +1048,20 @@ select pg_temp.assert_eq(
 do $$
 begin
   begin
+    perform public.reverse_transaction(
+      '00000000-0000-4000-8000-000000001007',
+      'cross user reversal'
+    );
+  exception when raise_exception then
+    return;
+  end;
+  raise exception 'cross-user reversal RPC was not rejected';
+end;
+$$;
+
+do $$
+begin
+  begin
     insert into public.audit_logs (
       user_id,
       actor_user_id,
@@ -615,6 +1084,23 @@ begin
     return;
   end;
   raise exception 'authenticated audit insert was not rejected';
+end;
+$$;
+
+set role anon;
+reset request.jwt.claim.sub;
+
+do $$
+begin
+  begin
+    perform public.reverse_transaction(
+      '00000000-0000-4000-8000-000000001007',
+      'anon reversal'
+    );
+  exception when insufficient_privilege then
+    return;
+  end;
+  raise exception 'anon reversal RPC was not rejected';
 end;
 $$;
 
@@ -648,11 +1134,13 @@ async function main() {
     });
     psqlFile(port, database, m03MigrationPath);
     psqlFile(port, database, m04MigrationPath);
+    psqlFile(port, database, m09MigrationPath);
     psqlFile(port, database, seedPath);
     psql(port, database, runtimeSql, {
       name: "runtime",
       tempDir,
     });
+    await runConcurrentReversalCheck(port, database, tempDir);
 
     console.log("M09 transactions runtime harness passed.");
   } finally {

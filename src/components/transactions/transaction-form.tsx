@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 
 import type {
   AccountReference,
@@ -43,6 +43,8 @@ export function TransactionForm({
     initialState ?? getInitialState(transaction),
   );
   const values = state.values;
+  const [paymentMethod, setPaymentMethod] = useState(values.paymentMethod);
+  const usesCreditCard = paymentMethod === "credit_card";
 
   return (
     <form action={formAction} className="grid gap-4">
@@ -98,11 +100,13 @@ export function TransactionForm({
             id="transaction-type"
             name="transactionType"
           >
-            {getEnumOptions("transaction_type").map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
+            {getEnumOptions("transaction_type")
+              .filter((option) => option.value !== "transfer")
+              .map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
           </select>
         </Field>
         <Field
@@ -115,6 +119,7 @@ export function TransactionForm({
             defaultValue={values.paymentMethod}
             id="payment-method"
             name="paymentMethod"
+            onChange={(event) => setPaymentMethod(event.currentTarget.value)}
           >
             {getEnumOptions("payment_method").map((option) => (
               <option key={option.value} value={option.value}>
@@ -176,7 +181,35 @@ export function TransactionForm({
         </Field>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2">
+      {usesCreditCard ? (
+        <Field
+          error={state.errors.creditCardId}
+          hint="Compras no cartao nao impactam conta na M09."
+          htmlFor="transaction-credit-card"
+          label="Cartao"
+        >
+          <select
+            className="border-border bg-background text-foreground focus-visible:ring-ring h-10 rounded-md border px-3 text-base outline-none focus-visible:ring-2 disabled:cursor-not-allowed disabled:opacity-60"
+            defaultValue={values.creditCardId}
+            disabled={creditCards.length === 0}
+            id="transaction-credit-card"
+            name="creditCardId"
+            required
+          >
+            <option value="">Selecione</option>
+            {creditCards.map((card) => (
+              <option key={card.id} value={card.id}>
+                {card.name}
+              </option>
+            ))}
+          </select>
+          {creditCards.length === 0 ? (
+            <span className="text-muted-foreground text-xs" role="status">
+              Nenhum cartao ativo disponivel para lancamento manual.
+            </span>
+          ) : null}
+        </Field>
+      ) : (
         <Field
           error={state.errors.accountId}
           hint="Obrigatoria para metodos que impactam conta."
@@ -188,8 +221,9 @@ export function TransactionForm({
             defaultValue={values.accountId}
             id="transaction-account"
             name="accountId"
+            required
           >
-            <option value="">Sem conta</option>
+            <option value="">Selecione</option>
             {accounts.map((account) => (
               <option key={account.id} value={account.id}>
                 {account.name} - {getEnumLabel("account_type", account.type)}
@@ -197,58 +231,7 @@ export function TransactionForm({
             ))}
           </select>
         </Field>
-        <Field
-          error={state.errors.creditCardId}
-          hint="Usado apenas com metodo cartao de credito."
-          htmlFor="transaction-credit-card"
-          label="Cartao"
-        >
-          <select
-            className="border-border bg-background text-foreground focus-visible:ring-ring h-10 rounded-md border px-3 text-base outline-none focus-visible:ring-2"
-            defaultValue={values.creditCardId}
-            id="transaction-credit-card"
-            name="creditCardId"
-          >
-            <option value="">Sem cartao</option>
-            {creditCards.map((card) => (
-              <option key={card.id} value={card.id}>
-                {card.name}
-              </option>
-            ))}
-          </select>
-        </Field>
-      </div>
-
-      <div className="grid gap-4 sm:grid-cols-2">
-        <Field
-          error={state.errors.externalFingerprint}
-          htmlFor="external-fingerprint"
-          label="Fingerprint externo"
-        >
-          <Input
-            autoComplete="off"
-            defaultValue={values.externalFingerprint}
-            hasError={Boolean(state.errors.externalFingerprint)}
-            id="external-fingerprint"
-            name="externalFingerprint"
-          />
-        </Field>
-        <Field
-          error={state.errors.sourceType}
-          htmlFor="source-type"
-          label="Origem"
-        >
-          <Input
-            autoComplete="off"
-            defaultValue={values.sourceType}
-            hasError={Boolean(state.errors.sourceType)}
-            id="source-type"
-            name="sourceType"
-          />
-        </Field>
-      </div>
-
-      <input name="sourceId" type="hidden" value={values.sourceId} />
+      )}
 
       <Field
         error={state.errors.notes}
@@ -315,11 +298,8 @@ function getInitialValues(
         : "",
     creditCardId: transaction?.creditCardId ?? "",
     description: transaction?.description ?? "",
-    externalFingerprint: transaction?.externalFingerprint ?? "",
     notes: transaction?.notes ?? "",
     paymentMethod: transaction?.paymentMethod ?? "pix",
-    sourceId: transaction?.sourceId ?? "",
-    sourceType: transaction?.sourceType ?? "",
     transactionDate: transaction?.transactionDate ?? "",
     transactionType: transaction?.transactionType ?? "expense",
   };

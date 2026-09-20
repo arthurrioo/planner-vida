@@ -18,11 +18,8 @@ export type TransactionFormValues = Readonly<{
   competenceDate: string;
   creditCardId: string;
   description: string;
-  externalFingerprint: string;
   notes: string;
   paymentMethod: string;
-  sourceId: string;
-  sourceType: string;
   transactionDate: string;
   transactionType: string;
 }>;
@@ -41,11 +38,8 @@ const transactionFormFields = [
   "competenceDate",
   "creditCardId",
   "description",
-  "externalFingerprint",
   "notes",
   "paymentMethod",
-  "sourceId",
-  "sourceType",
   "transactionDate",
   "transactionType",
 ] as const;
@@ -63,11 +57,8 @@ function transactionInputFromForm(formData: FormData): TransactionFormValues {
     competenceDate: getFormString(formData, "competenceDate"),
     creditCardId: getFormString(formData, "creditCardId"),
     description: getFormString(formData, "description"),
-    externalFingerprint: getFormString(formData, "externalFingerprint"),
     notes: getFormString(formData, "notes"),
     paymentMethod: getFormString(formData, "paymentMethod"),
-    sourceId: getFormString(formData, "sourceId"),
-    sourceType: getFormString(formData, "sourceType"),
     transactionDate: getFormString(formData, "transactionDate"),
     transactionType: getFormString(formData, "transactionType"),
   };

@@ -157,11 +157,18 @@ export type TransactionRepository = Readonly<{
   ): Promise<
     Readonly<{ original: TransactionRecord; reversal: TransactionRecord }>
   >;
-  updatePosted(
+  correct(
     context: RepositoryContext,
-    id: TransactionId,
-    mutation: TransactionMutation,
-  ): Promise<TransactionRecord>;
+    original: TransactionRecord,
+    reversal: TransactionReversalMutation,
+    replacement: TransactionMutation,
+  ): Promise<
+    Readonly<{
+      original: TransactionRecord;
+      replacement: TransactionRecord;
+      reversal: TransactionRecord;
+    }>
+  >;
   voidPosted(
     context: RepositoryContext,
     id: TransactionId,
@@ -316,20 +323,32 @@ export class TransactionService {
 
     const mutation = await this.prepareMutation(context, input, existing);
     const reason = "Corrected by manual edit.";
-    const result = await this.repository.reverse(
+    const result = await this.repository.correct(
       context,
       existing,
       toReversalMutation(existing, reason),
+      mutation,
     );
-    const changed = await this.repository.create(context, mutation);
     await this.recordTransactionAudit(
       context,
       result.original,
       "transactions.reverse_for_correction",
+      {
+        replacementId: result.replacement.id,
+        reversalId: result.reversal.id,
+      },
     );
-    await this.recordTransactionAudit(context, changed, "transactions.correct");
+    await this.recordTransactionAudit(
+      context,
+      result.replacement,
+      "transactions.correct",
+      {
+        originalId: result.original.id,
+        reversalId: result.reversal.id,
+      },
+    );
 
-    return changed;
+    return result.replacement;
   }
 
   async voidTransaction(
@@ -372,6 +391,7 @@ export class TransactionService {
       context,
       result.original,
       "transactions.reverse",
+      { reversalId: result.reversal.id },
     );
 
     return result;
@@ -401,15 +421,24 @@ export class TransactionService {
     const parsed = parseTransactionMutation(input);
 
     const category = parsed.categoryId
-      ? await this.requireCategory(context, parsed.categoryId)
+      ? await this.requireCategory(context, parsed.categoryId, {
+          allowHistorical:
+            current !== undefined &&
+            (parsed.categoryId === current.categoryId ||
+              parsed.categoryId === current.subcategoryId),
+        })
       : null;
     const categoryPair = await this.resolveCategoryPair(
       context,
       parsed.transactionType,
       category,
+      current,
     );
     const account = parsed.accountId
-      ? await this.requireAccount(context, parsed.accountId)
+      ? await this.requireAccount(context, parsed.accountId, {
+          allowHistorical:
+            current !== undefined && parsed.accountId === current.accountId,
+        })
       : null;
     const creditCard = parsed.creditCardId
       ? await this.requireCreditCard(context, parsed.creditCardId)
@@ -451,7 +480,11 @@ export class TransactionService {
     };
   }
 
-  private async requireAccount(context: RepositoryContext, id: AccountId) {
+  private async requireAccount(
+    context: RepositoryContext,
+    id: AccountId,
+    options: Readonly<{ allowHistorical?: boolean }> = {},
+  ) {
     const account = await this.references.findAccountById(context, id);
 
     if (!account) {
@@ -462,7 +495,7 @@ export class TransactionService {
 
     assertOwnedByContext(context, account);
 
-    if (account.status !== "active") {
+    if (!options.allowHistorical && account.status !== "active") {
       throw new DomainError("CONFLICT", "Account must be active.", {
         details: { accountId: id },
       });
@@ -471,7 +504,11 @@ export class TransactionService {
     return account;
   }
 
-  private async requireCategory(context: RepositoryContext, id: CategoryId) {
+  private async requireCategory(
+    context: RepositoryContext,
+    id: CategoryId,
+    options: Readonly<{ allowHistorical?: boolean }> = {},
+  ) {
     const category = await this.references.findCategoryById(context, id);
 
     if (!category) {
@@ -482,7 +519,7 @@ export class TransactionService {
 
     assertOwnedByContext(context, category);
 
-    if (category.archivedAt !== null) {
+    if (!options.allowHistorical && category.archivedAt !== null) {
       throw new DomainError("CONFLICT", "Category must be active.", {
         details: { categoryId: id },
       });
@@ -518,6 +555,7 @@ export class TransactionService {
     context: RepositoryContext,
     transactionType: Exclude<TransactionType, "transfer">,
     category: CategoryReference | null,
+    current?: TransactionRecord,
   ) {
     if (!category) {
       throw new DomainError(
@@ -530,7 +568,10 @@ export class TransactionService {
     }
 
     const root = category.parentId
-      ? await this.requireCategory(context, category.parentId)
+      ? await this.requireCategory(context, category.parentId, {
+          allowHistorical:
+            current !== undefined && category.parentId === current.categoryId,
+        })
       : category;
     const allowed = allowedCategoryTypesForTransaction(transactionType);
 
@@ -555,6 +596,7 @@ export class TransactionService {
     context: RepositoryContext,
     transaction: TransactionRecord,
     action: string,
+    extraMetadata: Readonly<Record<string, string | null>> = {},
   ) {
     if (!this.audit) {
       return;
@@ -571,11 +613,11 @@ export class TransactionService {
             type: "transaction",
           },
           metadata: {
-            amount: transaction.amount.amount,
             paymentMethod: transaction.paymentMethod,
             requestId: context.requestId ?? null,
             status: transaction.status,
             transactionType: transaction.transactionType,
+            ...extraMetadata,
           },
           occurredAt: this.now().toISOString(),
           originType: "manual",
@@ -612,6 +654,12 @@ export function asTransactionId(value: string): TransactionId {
     });
   }
 
+  if (!isUuid(trimmed)) {
+    throw new DomainError("VALIDATION_FAILED", "TransactionId is invalid.", {
+      details: { field: "transactionId" },
+    });
+  }
+
   return trimmed as TransactionId;
 }
 
@@ -620,6 +668,12 @@ export function asCreditCardId(value: string): CreditCardId {
 
   if (!trimmed) {
     throw new DomainError("VALIDATION_FAILED", "CreditCardId is required.", {
+      details: { field: "creditCardId" },
+    });
+  }
+
+  if (!isUuid(trimmed)) {
+    throw new DomainError("VALIDATION_FAILED", "CreditCardId is invalid.", {
       details: { field: "creditCardId" },
     });
   }
@@ -691,12 +745,12 @@ export function parseTransactionMutation(input: TransactionCommandInput): Omit<
     competenceMonth: toCompetenceMonth(competenceDate),
     creditCardId: parseOptionalId(input.creditCardId, asCreditCardId),
     description: description.trim(),
-    externalFingerprint: parseOptionalString(input.externalFingerprint),
+    externalFingerprint: null,
     notes,
     originType: "manual",
     paymentMethod,
-    sourceId: parseOptionalUuid(input.sourceId),
-    sourceType: parseOptionalString(input.sourceType),
+    sourceId: null,
+    sourceType: "manual",
     transactionDate,
     transactionType: supportedTransactionType,
   };
@@ -899,15 +953,6 @@ function parseOptionalString(value: unknown) {
   return trimmed ? trimmed : null;
 }
 
-function parseOptionalUuid(value: unknown) {
-  if (typeof value !== "string") {
-    return null;
-  }
-
-  const trimmed = value.trim();
-  return trimmed ? trimmed : null;
-}
-
 function parseOptionalId<TValue extends string>(
   value: unknown,
   parser: (value: string) => TValue,
@@ -947,4 +992,10 @@ function asAccountIdLoose(value: string): AccountId {
 
 function asCategoryIdLoose(value: string): CategoryId {
   return value as CategoryId;
+}
+
+function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    value,
+  );
 }

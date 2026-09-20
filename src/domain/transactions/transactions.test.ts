@@ -36,6 +36,9 @@ const categoryInvestmentA = asCategoryId(
   "00000000-0000-4000-8000-000000000908",
 );
 const creditCardA = asCreditCardId("00000000-0000-4000-8000-000000000909");
+const archivedAccountA = asAccountId("00000000-0000-4000-8000-000000000910");
+const closedAccountA = asAccountId("00000000-0000-4000-8000-000000000911");
+const archivedCategoryA = asCategoryId("00000000-0000-4000-8000-000000000912");
 
 describe("TransactionService", () => {
   it("creates income, expense, and investment posted facts with competence default", async () => {
@@ -225,8 +228,289 @@ describe("TransactionService", () => {
     });
 
     expect(reversed.original.status).toBe("reversed");
+    expect(reversed.reversal.status).toBe("reversed");
     expect(reversed.reversal.reversalOfTransactionId).toBe(second.id);
     expect(repository.records).toHaveLength(3);
+  });
+
+  it("rejects repeat lifecycle transitions and opposite transitions", async () => {
+    const repository = new InMemoryTransactionRepository();
+    const service = createService(repository);
+    const voided = await service.createTransaction(contextA, {
+      accountId: accountA,
+      amount: "10",
+      categoryId: categoryExpenseA,
+      description: "Anular",
+      paymentMethod: "pix",
+      transactionDate: "2026-09-20",
+      transactionType: "expense",
+    });
+    const reversed = await service.createTransaction(contextA, {
+      accountId: accountA,
+      amount: "11",
+      categoryId: categoryExpenseA,
+      description: "Estornar",
+      paymentMethod: "pix",
+      transactionDate: "2026-09-20",
+      transactionType: "expense",
+    });
+
+    await service.voidTransaction(contextA, voided.id, {
+      reason: "cancelamento",
+    });
+    await service.reverseTransaction(contextA, reversed.id, {
+      reason: "duplicado",
+    });
+
+    await expect(
+      service.voidTransaction(contextA, voided.id, { reason: "de novo" }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    await expect(
+      service.reverseTransaction(contextA, reversed.id, { reason: "de novo" }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    await expect(
+      service.reverseTransaction(contextA, voided.id, { reason: "depois" }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    await expect(
+      service.voidTransaction(contextA, reversed.id, { reason: "depois" }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+  });
+
+  it("corrects posted facts atomically with a reversed lineage row and posted replacement", async () => {
+    const repository = new InMemoryTransactionRepository();
+    const service = createService(repository);
+    const original = await service.createTransaction(contextA, {
+      accountId: accountA,
+      amount: "50",
+      categoryId: categoryExpenseA,
+      description: "Despesa original",
+      paymentMethod: "pix",
+      transactionDate: "2026-09-20",
+      transactionType: "expense",
+    });
+
+    const replacement = await service.updateTransaction(contextA, original.id, {
+      accountId: accountA,
+      amount: "35",
+      categoryId: categoryExpenseA,
+      description: "Despesa corrigida",
+      paymentMethod: "pix",
+      transactionDate: "2026-09-21",
+      transactionType: "expense",
+    });
+
+    const originalAfter = await repository.findById(contextA, original.id);
+    const reversals = repository.records.filter(
+      (record) => record.reversalOfTransactionId === original.id,
+    );
+
+    expect(originalAfter?.status).toBe("reversed");
+    expect(originalAfter?.reversedByTransactionId).toBe(reversals[0]?.id);
+    expect(reversals).toHaveLength(1);
+    expect(reversals[0]?.status).toBe("reversed");
+    expect(replacement.status).toBe("posted");
+    expect(replacement.amount.amount).toBe("35.0000");
+    expect(accountBalance(repository.records, accountA)).toBe(-35);
+  });
+
+  it("rolls back correction when replacement creation fails", async () => {
+    const repository = new InMemoryTransactionRepository();
+    repository.failCorrectReplacement = true;
+    const service = createService(repository);
+    const original = await service.createTransaction(contextA, {
+      accountId: accountA,
+      amount: "50",
+      categoryId: categoryExpenseA,
+      description: "Despesa original",
+      paymentMethod: "pix",
+      transactionDate: "2026-09-20",
+      transactionType: "expense",
+    });
+
+    await expect(
+      service.updateTransaction(contextA, original.id, {
+        accountId: accountA,
+        amount: "35",
+        categoryId: categoryExpenseA,
+        description: "Despesa corrigida",
+        paymentMethod: "pix",
+        transactionDate: "2026-09-21",
+        transactionType: "expense",
+      }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+
+    const originalAfter = await repository.findById(contextA, original.id);
+    const reversals = repository.records.filter(
+      (record) => record.reversalOfTransactionId === original.id,
+    );
+
+    expect(originalAfter?.status).toBe("posted");
+    expect(reversals).toHaveLength(0);
+    expect(repository.records).toHaveLength(1);
+  });
+
+  it("denies cross-user create, read, void, reverse, and correct access", async () => {
+    const repository = new InMemoryTransactionRepository();
+    const service = createService(repository);
+    const transaction = await service.createTransaction(contextA, {
+      accountId: accountA,
+      amount: "10",
+      categoryId: categoryExpenseA,
+      description: "Privada",
+      paymentMethod: "pix",
+      transactionDate: "2026-09-20",
+      transactionType: "expense",
+    });
+
+    await expect(
+      service.getTransaction({ userId: userB }, transaction.id),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(
+      service.voidTransaction({ userId: userB }, transaction.id, {
+        reason: "tentativa",
+      }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(
+      service.reverseTransaction({ userId: userB }, transaction.id, {
+        reason: "tentativa",
+      }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(
+      service.updateTransaction({ userId: userB }, transaction.id, {
+        accountId: accountA,
+        amount: "9",
+        categoryId: categoryExpenseA,
+        description: "Tentativa",
+        paymentMethod: "pix",
+        transactionDate: "2026-09-20",
+        transactionType: "expense",
+      }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(
+      service.createTransaction(contextA, {
+        accountId: accountA,
+        amount: "10",
+        categoryId: categoryExpenseA,
+        description: "Cartao com conta",
+        paymentMethod: "credit_card",
+        transactionDate: "2026-09-20",
+        transactionType: "expense",
+      }),
+    ).rejects.toMatchObject({ code: "VALIDATION_FAILED" });
+  });
+
+  it("rejects inactive account/category targets and invalid payment combinations", async () => {
+    const service = createService(new InMemoryTransactionRepository(), {
+      accounts: [
+        defaultAccounts()[0],
+        { ...defaultAccounts()[0], id: archivedAccountA, status: "archived" },
+        { ...defaultAccounts()[0], id: closedAccountA, status: "closed" },
+      ],
+      categories: [
+        ...defaultCategories(),
+        {
+          ...defaultCategories()[1],
+          archivedAt: "2026-09-19T00:00:00.000Z",
+          id: archivedCategoryA,
+        },
+      ],
+    });
+
+    await expect(
+      service.createTransaction(contextA, {
+        accountId: archivedAccountA,
+        amount: "10",
+        categoryId: categoryExpenseA,
+        description: "Conta arquivada",
+        paymentMethod: "pix",
+        transactionDate: "2026-09-20",
+        transactionType: "expense",
+      }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    await expect(
+      service.createTransaction(contextA, {
+        accountId: closedAccountA,
+        amount: "10",
+        categoryId: categoryExpenseA,
+        description: "Conta fechada",
+        paymentMethod: "pix",
+        transactionDate: "2026-09-20",
+        transactionType: "expense",
+      }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    await expect(
+      service.createTransaction(contextA, {
+        accountId: accountA,
+        amount: "10",
+        categoryId: archivedCategoryA,
+        description: "Categoria arquivada",
+        paymentMethod: "pix",
+        transactionDate: "2026-09-20",
+        transactionType: "expense",
+      }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    await expect(
+      service.createTransaction(contextA, {
+        accountId: accountA,
+        amount: "10",
+        categoryId: categoryIncomeA,
+        creditCardId: creditCardA,
+        description: "Receita cartao",
+        paymentMethod: "credit_card",
+        transactionDate: "2026-09-20",
+        transactionType: "income",
+      }),
+    ).rejects.toMatchObject({ code: "VALIDATION_FAILED" });
+    await expect(
+      service.createTransaction(contextA, {
+        accountId: accountA,
+        amount: "10",
+        categoryId: categoryExpenseA,
+        description: "Metodo invalido",
+        paymentMethod: "invalid",
+        transactionDate: "2026-09-20",
+        transactionType: "expense",
+      }),
+    ).rejects.toMatchObject({ code: "VALIDATION_FAILED" });
+  });
+
+  it("validates amount precision, LocalDate edges, and UUID input safely", async () => {
+    const service = createService(new InMemoryTransactionRepository());
+
+    await expect(
+      service.createTransaction(contextA, {
+        accountId: accountA,
+        amount: "0",
+        categoryId: categoryExpenseA,
+        description: "Zero",
+        paymentMethod: "pix",
+        transactionDate: "2026-09-20",
+        transactionType: "expense",
+      }),
+    ).rejects.toMatchObject({ code: "VALIDATION_FAILED" });
+    await expect(
+      service.createTransaction(contextA, {
+        accountId: accountA,
+        amount: "10.12345",
+        categoryId: categoryExpenseA,
+        description: "Precisao",
+        paymentMethod: "pix",
+        transactionDate: "2026-09-20",
+        transactionType: "expense",
+      }),
+    ).rejects.toMatchObject({ code: "VALIDATION_FAILED" });
+    await expect(
+      service.createTransaction(contextA, {
+        accountId: accountA,
+        amount: "10",
+        categoryId: categoryExpenseA,
+        description: "Data invalida",
+        paymentMethod: "pix",
+        transactionDate: "2026-02-30",
+        transactionType: "expense",
+      }),
+    ).rejects.toMatchObject({ code: "VALIDATION_FAILED" });
+    expect(() => asTransactionId("not-a-uuid")).toThrow(DomainError);
   });
 
   it("does not fail persisted mutations when audit write fails", async () => {
@@ -274,6 +558,7 @@ function createService(
 }
 
 class InMemoryTransactionRepository implements TransactionRepository {
+  failCorrectReplacement = false;
   records: TransactionRecord[] = [];
   private sequence = 1;
 
@@ -313,6 +598,21 @@ class InMemoryTransactionRepository implements TransactionRepository {
     original: TransactionRecord,
     reversal: TransactionReversalMutation,
   ) {
+    const current = await this.findById(context, original.id);
+    if (
+      !current ||
+      current.status !== "posted" ||
+      current.originType !== "manual"
+    ) {
+      throw new DomainError("CONFLICT", "Cannot reverse.");
+    }
+    if (
+      this.records.some(
+        (record) => record.reversalOfTransactionId === original.id,
+      )
+    ) {
+      throw new DomainError("CONFLICT", "Already reversed.");
+    }
     const reversalRecord = this.toRecord(context, reversal, {
       reversalOfTransactionId: reversal.reversalOfTransactionId,
       reversalReason: reversal.reversalReason,
@@ -332,20 +632,31 @@ class InMemoryTransactionRepository implements TransactionRepository {
     return { original: updatedOriginal, reversal: reversalRecord };
   }
 
-  async updatePosted(
+  async correct(
     context: RepositoryContext,
-    id: string,
-    mutation: TransactionMutation,
+    original: TransactionRecord,
+    reversal: TransactionReversalMutation,
+    replacement: TransactionMutation,
   ) {
-    const current = await this.findById(context, id);
-    if (!current) {
-      throw new DomainError("NOT_FOUND", "Missing.");
+    const snapshot = [...this.records];
+    try {
+      const reversed = await this.reverse(context, original, reversal);
+
+      if (this.failCorrectReplacement) {
+        throw new DomainError("CONFLICT", "Injected replacement failure.");
+      }
+
+      const replacementRecord = this.toRecord(context, replacement);
+      this.records.push(replacementRecord);
+
+      return {
+        ...reversed,
+        replacement: replacementRecord,
+      };
+    } catch (error) {
+      this.records = snapshot;
+      throw error;
     }
-    const updated = { ...this.toRecord(context, mutation), id: current.id };
-    this.records = this.records.map((record) =>
-      record.id === current.id ? updated : record,
-    );
-    return updated;
   }
 
   async voidPosted(
@@ -357,6 +668,9 @@ class InMemoryTransactionRepository implements TransactionRepository {
     const current = await this.findById(context, id);
     if (!current) {
       throw new DomainError("NOT_FOUND", "Missing.");
+    }
+    if (current.status !== "posted" || current.originType !== "manual") {
+      throw new DomainError("CONFLICT", "Cannot void.");
     }
     const updated = {
       ...current,
@@ -421,56 +735,8 @@ class InMemoryReferenceRepository {
       creditCards: CreditCardReference[];
     }>,
   ) {
-    this.accounts = overrides.accounts ?? [
-      {
-        id: accountA,
-        name: "Conta",
-        status: "active",
-        type: "checking",
-        userId: userA,
-      },
-      {
-        id: benefitAccountA,
-        name: "Beneficio",
-        status: "active",
-        type: "benefit",
-        userId: userA,
-      },
-    ];
-    this.categories = overrides.categories ?? [
-      {
-        archivedAt: null,
-        id: categoryIncomeA,
-        name: "Receitas",
-        parentId: null,
-        type: "income",
-        userId: userA,
-      },
-      {
-        archivedAt: null,
-        id: categoryExpenseA,
-        name: "Despesas",
-        parentId: null,
-        type: "variable_expense",
-        userId: userA,
-      },
-      {
-        archivedAt: null,
-        id: subcategoryExpenseA,
-        name: "Mercado",
-        parentId: categoryExpenseA,
-        type: "variable_expense",
-        userId: userA,
-      },
-      {
-        archivedAt: null,
-        id: categoryInvestmentA,
-        name: "Investimentos",
-        parentId: null,
-        type: "investment",
-        userId: userA,
-      },
-    ];
+    this.accounts = overrides.accounts ?? [...defaultAccounts()];
+    this.categories = overrides.categories ?? [...defaultCategories()];
     this.creditCards = overrides.creditCards ?? [
       {
         id: creditCardA,
@@ -504,6 +770,81 @@ class InMemoryReferenceRepository {
   async listCreditCards() {
     return this.creditCards;
   }
+}
+
+function accountBalance(
+  records: readonly TransactionRecord[],
+  accountId: string,
+) {
+  return records
+    .filter(
+      (record) =>
+        record.accountId === accountId &&
+        record.status === "posted" &&
+        record.paymentMethod !== "credit_card",
+    )
+    .reduce((total, record) => {
+      const amount = Number(record.amount.amount);
+      return record.transactionType === "income"
+        ? total + amount
+        : total - amount;
+    }, 0);
+}
+
+function defaultAccounts(): AccountReference[] {
+  return [
+    {
+      id: accountA,
+      name: "Conta",
+      status: "active",
+      type: "checking",
+      userId: userA,
+    },
+    {
+      id: benefitAccountA,
+      name: "Beneficio",
+      status: "active",
+      type: "benefit",
+      userId: userA,
+    },
+  ];
+}
+
+function defaultCategories(): CategoryReference[] {
+  return [
+    {
+      archivedAt: null,
+      id: categoryIncomeA,
+      name: "Receitas",
+      parentId: null,
+      type: "income",
+      userId: userA,
+    },
+    {
+      archivedAt: null,
+      id: categoryExpenseA,
+      name: "Despesas",
+      parentId: null,
+      type: "variable_expense",
+      userId: userA,
+    },
+    {
+      archivedAt: null,
+      id: subcategoryExpenseA,
+      name: "Mercado",
+      parentId: categoryExpenseA,
+      type: "variable_expense",
+      userId: userA,
+    },
+    {
+      archivedAt: null,
+      id: categoryInvestmentA,
+      name: "Investimentos",
+      parentId: null,
+      type: "investment",
+      userId: userA,
+    },
+  ];
 }
 
 function auditRecorder(): AuditService & { events: AuditEvent[] } {

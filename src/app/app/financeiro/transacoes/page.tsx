@@ -6,9 +6,10 @@ import { ModulePage } from "@/components/app/module-page";
 import { ProtectedAppShell } from "@/components/app/protected-app-shell";
 import { TransactionForm } from "@/components/transactions/transaction-form";
 import { TransactionStatusMessage } from "@/components/transactions/transaction-status-message";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Input } from "@/components/ui/form";
+import { Field, Input } from "@/components/ui/form";
 import { ResponsiveTable } from "@/components/ui/responsive-table";
 import { asUserId, getEnumLabel, parseLocalDate } from "@/domain/shared";
 import {
@@ -65,27 +66,32 @@ export default async function TransactionsPage({ searchParams }: PageProps) {
           </CardHeader>
           <CardContent>
             <form className="grid gap-4 sm:grid-cols-4">
-              <Input
-                defaultValue={readParam(params.query)}
-                name="query"
-                placeholder="Buscar descricao"
-              />
-              <Input
-                defaultValue={readParam(params.dateFrom)}
-                name="dateFrom"
-                type="date"
-              />
-              <Input
-                defaultValue={readParam(params.dateTo)}
-                name="dateTo"
-                type="date"
-              />
-              <button
-                className="bg-primary text-primary-foreground hover:bg-primary/90 h-10 rounded-md px-4 text-sm font-medium"
-                type="submit"
-              >
+              <Field htmlFor="transaction-search" label="Buscar descricao">
+                <Input
+                  defaultValue={readParam(params.query)}
+                  id="transaction-search"
+                  name="query"
+                />
+              </Field>
+              <Field htmlFor="transaction-date-from" label="Data inicial">
+                <Input
+                  defaultValue={readParam(params.dateFrom)}
+                  id="transaction-date-from"
+                  name="dateFrom"
+                  type="date"
+                />
+              </Field>
+              <Field htmlFor="transaction-date-to" label="Data final">
+                <Input
+                  defaultValue={readParam(params.dateTo)}
+                  id="transaction-date-to"
+                  name="dateTo"
+                  type="date"
+                />
+              </Field>
+              <Button className="self-end" type="submit">
                 Filtrar
-              </button>
+              </Button>
             </form>
           </CardContent>
         </Card>
@@ -161,11 +167,19 @@ function searchFromParams(
   }
 
   if (dateFrom) {
-    search.dateFrom = parseLocalDate(dateFrom);
+    try {
+      search.dateFrom = parseLocalDate(dateFrom);
+    } catch {
+      // Invalid filter input is ignored so the page remains safe/renderable.
+    }
   }
 
   if (dateTo) {
-    search.dateTo = parseLocalDate(dateTo);
+    try {
+      search.dateTo = parseLocalDate(dateTo);
+    } catch {
+      // Invalid filter input is ignored so the page remains safe/renderable.
+    }
   }
 
   if (status && isTransactionStatus(status)) {

@@ -191,28 +191,6 @@ export class SupabaseTransactionRepository implements TransactionRepository {
     return mapTransactionRow(data as unknown as TransactionRow);
   }
 
-  async updatePosted(
-    context: RepositoryContext,
-    id: string,
-    mutation: TransactionMutation,
-  ) {
-    const { data, error } = await this.supabase
-      .from("transactions")
-      .update(toTransactionUpdate(mutation))
-      .eq("user_id", context.userId)
-      .eq("id", id)
-      .eq("status", "posted")
-      .eq("origin_type", "manual")
-      .select(transactionColumns)
-      .single();
-
-    if (error) {
-      throw mapSupabaseError(error);
-    }
-
-    return mapTransactionRow(data as unknown as TransactionRow);
-  }
-
   async voidPosted(
     context: RepositoryContext,
     id: string,
@@ -234,59 +212,51 @@ export class SupabaseTransactionRepository implements TransactionRepository {
       .single();
 
     if (error) {
-      throw mapSupabaseError(error);
+      throw error.code === "PGRST116"
+        ? new DomainError(
+            "CONFLICT",
+            "Only manual posted transactions can be voided.",
+          )
+        : mapSupabaseError(error);
     }
 
     return mapTransactionRow(data as unknown as TransactionRow);
   }
 
   async reverse(
-    context: RepositoryContext,
+    _context: RepositoryContext,
     original: TransactionRecord,
     reversal: TransactionReversalMutation,
   ) {
-    const { data: reversalData, error: reversalError } = await this.supabase
-      .from("transactions")
-      .insert({
-        ...toTransactionInsert(context, reversal),
-        reversal_of_transaction_id: reversal.reversalOfTransactionId,
-        reversal_reason: reversal.reversalReason,
-        status: "reversed",
-      })
-      .select(transactionColumns)
-      .single();
+    const { data, error } = await this.supabase.rpc("reverse_transaction", {
+      p_reversal_reason: reversal.reversalReason,
+      p_transaction_id: original.id,
+    });
 
-    if (reversalError) {
-      throw mapSupabaseError(reversalError);
+    if (error) {
+      throw mapSupabaseError(error);
     }
 
-    const reversalRecord = mapTransactionRow(
-      reversalData as unknown as TransactionRow,
-    );
+    return mapReverseRpcResult(data);
+  }
 
-    const { data: originalData, error: originalError } = await this.supabase
-      .from("transactions")
-      .update({
-        reversed_at: new Date().toISOString(),
-        reversed_by_transaction_id: reversalRecord.id,
-        reversal_reason: reversal.reversalReason,
-        status: "reversed",
-      })
-      .eq("user_id", context.userId)
-      .eq("id", original.id)
-      .eq("status", "posted")
-      .eq("origin_type", "manual")
-      .select(transactionColumns)
-      .single();
+  async correct(
+    context: RepositoryContext,
+    original: TransactionRecord,
+    reversal: TransactionReversalMutation,
+    replacement: TransactionMutation,
+  ) {
+    const { data, error } = await this.supabase.rpc("correct_transaction", {
+      p_replacement: toTransactionRpcPayload(context, replacement),
+      p_reversal_reason: reversal.reversalReason,
+      p_transaction_id: original.id,
+    });
 
-    if (originalError) {
-      throw mapSupabaseError(originalError);
+    if (error) {
+      throw mapSupabaseError(error);
     }
 
-    return {
-      original: mapTransactionRow(originalData as unknown as TransactionRow),
-      reversal: reversalRecord,
-    };
+    return mapCorrectRpcResult(data);
   }
 }
 
@@ -574,28 +544,50 @@ function toTransactionInsert(
   };
 }
 
-function toTransactionUpdate(mutation: TransactionMutation) {
+function isOriginType(value: string): value is OriginType {
+  return originTypes.includes(value as OriginType);
+}
+
+function toTransactionRpcPayload(
+  context: RepositoryContext,
+  mutation: TransactionMutation,
+) {
   return {
-    account_id: mutation.accountId,
-    amount: mutation.amount.amount,
-    category_id: mutation.categoryId,
-    competence_date: mutation.competenceDate,
-    competence_month: mutation.competenceMonth,
-    credit_card_id: mutation.creditCardId,
-    description: mutation.description,
-    external_fingerprint: mutation.externalFingerprint,
-    notes: mutation.notes,
-    payment_method: mutation.paymentMethod,
-    source_id: mutation.sourceId,
-    source_type: mutation.sourceType,
-    subcategory_id: mutation.subcategoryId,
-    transaction_date: mutation.transactionDate,
-    transaction_type: mutation.transactionType,
+    ...toTransactionInsert(context, mutation),
+    posted_at: undefined,
+    user_id: undefined,
   };
 }
 
-function isOriginType(value: string): value is OriginType {
-  return originTypes.includes(value as OriginType);
+function mapReverseRpcResult(value: unknown) {
+  const result = assertRpcObject(value);
+
+  return {
+    original: mapTransactionRow(result.original as TransactionRow),
+    reversal: mapTransactionRow(result.reversal as TransactionRow),
+  };
+}
+
+function mapCorrectRpcResult(value: unknown) {
+  const result = assertRpcObject(value);
+
+  return {
+    original: mapTransactionRow(result.original as TransactionRow),
+    replacement: mapTransactionRow(result.replacement as TransactionRow),
+    reversal: mapTransactionRow(result.reversal as TransactionRow),
+  };
+}
+
+function assertRpcObject(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object") {
+    throw new DomainError(
+      "UNEXPECTED",
+      "Unexpected transaction RPC response.",
+      { details: { source: "database" } },
+    );
+  }
+
+  return value as Record<string, unknown>;
 }
 
 function mapSupabaseError(error: { code?: string; message: string }) {
@@ -603,6 +595,28 @@ function mapSupabaseError(error: { code?: string; message: string }) {
     return new DomainError(
       "CONFLICT",
       "Transaction conflicts with existing data.",
+      { details: { source: "database" } },
+    );
+  }
+
+  if (
+    error.code === "P0001" &&
+    error.message.includes("m09_transaction_conflict")
+  ) {
+    return new DomainError(
+      "CONFLICT",
+      "Transaction lifecycle transition conflicts with current state.",
+      { details: { source: "database" } },
+    );
+  }
+
+  if (
+    error.code === "P0001" &&
+    error.message.includes("m09_transaction_validation")
+  ) {
+    return new DomainError(
+      "VALIDATION_FAILED",
+      "Transaction input is invalid.",
       { details: { source: "database" } },
     );
   }
@@ -619,6 +633,13 @@ function mapSupabaseError(error: { code?: string; message: string }) {
       "CONFLICT",
       "Transaction references missing or incompatible data.",
       { details: { source: "database" } },
+    );
+  }
+
+  if (error.code === "22P02") {
+    return new DomainError(
+      "VALIDATION_FAILED",
+      "Transaction input is invalid.",
     );
   }
 

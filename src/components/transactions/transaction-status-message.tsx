@@ -19,7 +19,7 @@ export function TransactionStatusMessage({
           ? "border-danger/35 bg-danger-muted text-danger rounded-md border p-3 text-sm font-medium"
           : "border-success/35 bg-success-muted text-success rounded-md border p-3 text-sm font-medium"
       }
-      role="status"
+      role={error ? "alert" : "status"}
     >
       {error ?? message}
     </div>
