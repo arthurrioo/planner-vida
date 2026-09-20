@@ -147,11 +147,41 @@ export class TransferService {
     return this.repository.list(context);
   }
 
+  async listDisplayAccounts(context: RepositoryContext) {
+    return this.references.listAccounts(context);
+  }
+
   async listFormOptions(context: RepositoryContext) {
     const accounts = await this.references.listAccounts(context);
 
     return {
       accounts: accounts.filter((account) => account.status === "active"),
+    };
+  }
+
+  async listCorrectionOptions(
+    context: RepositoryContext,
+    transfer: TransferRecord,
+  ) {
+    const accounts = await this.references.listAccounts(context);
+    const accountById = new Map(
+      accounts.map((account) => [account.id, account]),
+    );
+    const options = accounts.filter((account) => account.status === "active");
+
+    for (const accountId of [
+      transfer.sourceAccountId,
+      transfer.destinationAccountId,
+    ]) {
+      const account = accountById.get(accountId);
+
+      if (account && !options.some((option) => option.id === account.id)) {
+        options.push(account);
+      }
+    }
+
+    return {
+      accounts: options,
     };
   }
 
@@ -189,7 +219,11 @@ export class TransferService {
     const existing = await this.requireTransfer(context, id);
 
     assertPostedManualTransfer(existing);
-    const mutation = await this.prepareMutation(context, input);
+    const mutation = await this.prepareCorrectionMutation(
+      context,
+      input,
+      existing,
+    );
     const reason = "Corrected by manual edit.";
     const result = await this.repository.correct(
       context,
@@ -296,6 +330,46 @@ export class TransferService {
     };
   }
 
+  private async prepareCorrectionMutation(
+    context: RepositoryContext,
+    input: TransferCommandInput,
+    existing: TransferRecord,
+  ): Promise<TransferMutation> {
+    const parsed = parseTransferMutation(input);
+
+    if (parsed.sourceAccountId === parsed.destinationAccountId) {
+      throw validationError([
+        {
+          code: "same_account",
+          message: "Source and destination accounts must differ.",
+          path: "destinationAccountId",
+        },
+      ]);
+    }
+
+    const [source, destination] = await Promise.all([
+      this.requireCorrectionAccount(
+        context,
+        parsed.sourceAccountId,
+        "sourceAccountId",
+        existing.sourceAccountId,
+      ),
+      this.requireCorrectionAccount(
+        context,
+        parsed.destinationAccountId,
+        "destinationAccountId",
+        existing.destinationAccountId,
+      ),
+    ]);
+
+    return {
+      ...parsed,
+      destinationAccountId: destination.id,
+      originType: "manual",
+      sourceAccountId: source.id,
+    };
+  }
+
   private async requireActiveAccount(
     context: RepositoryContext,
     id: AccountId,
@@ -312,6 +386,31 @@ export class TransferService {
     assertOwnedByContext(context, account);
 
     if (account.status !== "active") {
+      throw new DomainError("CONFLICT", "Account must be active.", {
+        details: { [field]: id },
+      });
+    }
+
+    return account;
+  }
+
+  private async requireCorrectionAccount(
+    context: RepositoryContext,
+    id: AccountId,
+    field: "destinationAccountId" | "sourceAccountId",
+    originalId: AccountId,
+  ) {
+    const account = await this.references.findAccountById(context, id);
+
+    if (!account) {
+      throw new DomainError("NOT_FOUND", "Account was not found.", {
+        details: { [field]: id },
+      });
+    }
+
+    assertOwnedByContext(context, account);
+
+    if (account.status !== "active" && id !== originalId) {
       throw new DomainError("CONFLICT", "Account must be active.", {
         details: { [field]: id },
       });
@@ -341,7 +440,6 @@ export class TransferService {
             type: "transfer",
           },
           metadata: {
-            amount: transfer.amount.amount,
             destinationAccountId: transfer.destinationAccountId,
             requestId: context.requestId ?? null,
             sourceAccountId: transfer.sourceAccountId,

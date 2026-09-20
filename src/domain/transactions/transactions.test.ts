@@ -21,6 +21,7 @@ import {
   type AuditService,
   type RepositoryContext,
 } from "@/domain/shared";
+import { asTransferId } from "@/domain/transfers";
 
 const userA = asUserId("00000000-0000-4000-8000-000000000901");
 const userB = asUserId("00000000-0000-4000-8000-000000000902");
@@ -168,6 +169,69 @@ describe("TransactionService", () => {
     ).rejects.toMatchObject({ code: "VALIDATION_FAILED" });
   });
 
+  it("rejects transfer-owned rows from ordinary M09 update, void, reverse, and correct lifecycle", async () => {
+    const repository = new InMemoryTransactionRepository();
+    const service = createService(repository);
+    const transferRow = transactionRecord({
+      transferId: asTransferId("00000000-0000-4000-8000-000000000990"),
+      transactionType: "transfer" as never,
+    });
+
+    repository.records.push(transferRow);
+
+    await expect(
+      service.updateTransaction(contextA, transferRow.id, {
+        accountId: accountA,
+        amount: "9",
+        categoryId: categoryExpenseA,
+        description: "Tentativa",
+        paymentMethod: "pix",
+        transactionDate: "2026-09-20",
+        transactionType: "expense",
+      }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    await expect(
+      service.voidTransaction(contextA, transferRow.id, { reason: "void" }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    await expect(
+      service.reverseTransaction(contextA, transferRow.id, {
+        reason: "reverse",
+      }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+
+    expect(repository.records).toEqual([transferRow]);
+  });
+
+  it("rejects rows with transfer linkage even if type data is corrupted away from transfer", async () => {
+    const repository = new InMemoryTransactionRepository();
+    const service = createService(repository);
+    const transferLinkedExpense = transactionRecord({
+      transferId: asTransferId("00000000-0000-4000-8000-000000000991"),
+      transactionType: "expense",
+    });
+
+    repository.records.push(transferLinkedExpense);
+
+    await expect(
+      service.reverseTransaction(contextA, transferLinkedExpense.id, {
+        reason: "reverse",
+      }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    await expect(
+      service.updateTransaction(contextA, transferLinkedExpense.id, {
+        accountId: accountA,
+        amount: "9",
+        categoryId: categoryExpenseA,
+        description: "Tentativa",
+        paymentMethod: "pix",
+        transactionDate: "2026-09-20",
+        transactionType: "expense",
+      }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+
+    expect(repository.records).toEqual([transferLinkedExpense]);
+  });
+
   it("rejects cross-user references even when a repository returns them", async () => {
     const service = createService(new InMemoryTransactionRepository(), {
       accounts: [
@@ -310,7 +374,7 @@ describe("TransactionService", () => {
     expect(reversals[0]?.status).toBe("reversed");
     expect(replacement.status).toBe("posted");
     expect(replacement.amount.amount).toBe("35.0000");
-    expect(accountBalance(repository.records, accountA)).toBe(-35);
+    expect(accountBalance(repository.records, accountA)).toBe("-35.0000");
   });
 
   it("rolls back correction when replacement creation fails", async () => {
@@ -777,7 +841,7 @@ function accountBalance(
   records: readonly TransactionRecord[],
   accountId: string,
 ) {
-  return records
+  const total = records
     .filter(
       (record) =>
         record.accountId === accountId &&
@@ -785,11 +849,64 @@ function accountBalance(
         record.paymentMethod !== "credit_card",
     )
     .reduce((total, record) => {
-      const amount = Number(record.amount.amount);
+      const amount = scaledMoney(record.amount.amount);
       return record.transactionType === "income"
         ? total + amount
         : total - amount;
-    }, 0);
+    }, BigInt(0));
+
+  return formatScaledMoney(total);
+}
+
+function scaledMoney(value: string) {
+  const sign = value.startsWith("-") ? -BigInt(1) : BigInt(1);
+  const unsigned = value.startsWith("-") ? value.slice(1) : value;
+  const [integer, fraction = ""] = unsigned.split(".");
+
+  return sign * BigInt(`${integer}${fraction.padEnd(4, "0")}`);
+}
+
+function formatScaledMoney(value: bigint) {
+  const sign = value < BigInt(0) ? "-" : "";
+  const absolute = value < BigInt(0) ? -value : value;
+  const raw = absolute.toString().padStart(5, "0");
+
+  return `${sign}${raw.slice(0, -4)}.${raw.slice(-4)}`;
+}
+
+function transactionRecord(
+  overrides: Partial<TransactionRecord> = {},
+): TransactionRecord {
+  return {
+    accountId: accountA,
+    amount: { amount: "10.0000" as never, currency: "BRL" },
+    categoryId: categoryExpenseA,
+    competenceDate: "2026-09-20" as never,
+    competenceMonth: "2026-09-01" as never,
+    creditCardId: null,
+    currency: "BRL",
+    description: "Linha de transferencia",
+    externalFingerprint: null,
+    id: asTransactionId("00000000-0000-4000-8000-000000000989"),
+    notes: null,
+    originType: "manual",
+    paymentMethod: "bank_transfer",
+    postedAt: "2026-09-20T12:00:00.000Z",
+    reversalOfTransactionId: null,
+    reversalReason: null,
+    reversedAt: null,
+    reversedByTransactionId: null,
+    sourceId: null,
+    sourceType: "transfer",
+    status: "posted",
+    subcategoryId: null,
+    transactionDate: "2026-09-20" as never,
+    transactionType: "expense",
+    transferId: null,
+    userId: userA,
+    voidedAt: null,
+    ...overrides,
+  };
 }
 
 function defaultAccounts(): AccountReference[] {

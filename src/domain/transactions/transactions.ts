@@ -318,7 +318,8 @@ export class TransactionService {
     if (
       existing.status !== "posted" ||
       existing.originType !== "manual" ||
-      existing.transactionType === "transfer"
+      existing.transactionType === "transfer" ||
+      existing.transferId !== null
     ) {
       throw new DomainError(
         "CONFLICT",
@@ -782,7 +783,8 @@ function assertPostedManual(transaction: TransactionRecord) {
   if (
     transaction.status !== "posted" ||
     transaction.originType !== "manual" ||
-    transaction.transactionType === "transfer"
+    transaction.transactionType === "transfer" ||
+    transaction.transferId !== null
   ) {
     throw new DomainError(
       "CONFLICT",

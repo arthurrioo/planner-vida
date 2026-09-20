@@ -11,6 +11,7 @@ import {
 } from "@/domain/shared";
 import {
   asTransferId,
+  parseTransferMutation,
   TransferService,
   type TransferAccountReference,
   type TransferMutation,
@@ -25,6 +26,10 @@ const contextA: RepositoryContext = { userId: userA };
 const sourceAccountA = asAccountId("00000000-0000-4000-8000-000000001003");
 const destinationAccountA = asAccountId("00000000-0000-4000-8000-000000001004");
 const archivedAccountA = asAccountId("00000000-0000-4000-8000-000000001005");
+const closedAccountA = asAccountId("00000000-0000-4000-8000-000000001006");
+const activeReplacementAccountA = asAccountId(
+  "00000000-0000-4000-8000-000000001007",
+);
 
 describe("TransferService", () => {
   it("creates an atomic transfer with linked outflow and inflow statement rows", async () => {
@@ -47,11 +52,13 @@ describe("TransferService", () => {
     expect(result.inflow.transferId).toBe(result.transfer.id);
     expect(result.transfer.outflowTransactionId).toBe(result.outflow.id);
     expect(result.transfer.inflowTransactionId).toBe(result.inflow.id);
-    expect(balanceImpact(repository.transfers, sourceAccountA)).toBe(-250.45);
-    expect(balanceImpact(repository.transfers, destinationAccountA)).toBe(
-      250.45,
+    expect(balanceImpact(repository.transfers, sourceAccountA)).toBe(
+      "-250.4500",
     );
-    expect(plTotal(repository.transactions)).toBe(0);
+    expect(balanceImpact(repository.transfers, destinationAccountA)).toBe(
+      "250.4500",
+    );
+    expect(plTotal(repository.transactions)).toBe("0.0000");
   });
 
   it("rejects same-account, inactive-account, and invalid money transfers", async () => {
@@ -62,6 +69,13 @@ describe("TransferService", () => {
           id: archivedAccountA,
           name: "Arquivada",
           status: "archived",
+          type: "checking",
+          userId: userA,
+        },
+        {
+          id: closedAccountA,
+          name: "Encerrada",
+          status: "closed",
           type: "checking",
           userId: userA,
         },
@@ -84,6 +98,16 @@ describe("TransferService", () => {
         description: "Destino arquivado",
         destinationAccountId: archivedAccountA,
         sourceAccountId: sourceAccountA,
+        transferDate: "2026-09-20",
+      }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+
+    await expect(
+      service.createTransfer(contextA, {
+        amount: "10",
+        description: "Origem encerrada",
+        destinationAccountId: destinationAccountA,
+        sourceAccountId: closedAccountA,
         transferDate: "2026-09-20",
       }),
     ).rejects.toMatchObject({ code: "CONFLICT" });
@@ -146,9 +170,11 @@ describe("TransferService", () => {
     expect(reversed.reversalInflow.reversalOfTransactionId).toBe(
       created.inflow.id,
     );
-    expect(balanceImpact(repository.transfers, sourceAccountA)).toBe(0);
-    expect(balanceImpact(repository.transfers, destinationAccountA)).toBe(0);
-    expect(plTotal(repository.transactions)).toBe(0);
+    expect(balanceImpact(repository.transfers, sourceAccountA)).toBe("0.0000");
+    expect(balanceImpact(repository.transfers, destinationAccountA)).toBe(
+      "0.0000",
+    );
+    expect(plTotal(repository.transactions)).toBe("0.0000");
 
     await expect(
       service.reverseTransfer(contextA, created.transfer.id, {
@@ -184,9 +210,242 @@ describe("TransferService", () => {
 
     expect(original?.status).toBe("reversed");
     expect(replacement.transfer.status).toBe("posted");
-    expect(balanceImpact(repository.transfers, sourceAccountA)).toBe(-120);
-    expect(balanceImpact(repository.transfers, destinationAccountA)).toBe(120);
-    expect(plTotal(repository.transactions)).toBe(0);
+    expect(balanceImpact(repository.transfers, sourceAccountA)).toBe(
+      "-120.0000",
+    );
+    expect(balanceImpact(repository.transfers, destinationAccountA)).toBe(
+      "120.0000",
+    );
+    expect(plTotal(repository.transactions)).toBe("0.0000");
+  });
+
+  it("allows correction to preserve historical inactive accounts but rejects changed inactive targets", async () => {
+    const repository = new InMemoryTransferRepository();
+    const activeService = createService(repository, {
+      accounts: [
+        ...defaultAccounts(),
+        {
+          id: activeReplacementAccountA,
+          name: "Conta ativa nova",
+          status: "active",
+          type: "checking",
+          userId: userA,
+        },
+      ],
+    });
+    const created = await activeService.createTransfer(contextA, {
+      amount: "100",
+      description: "Historica",
+      destinationAccountId: destinationAccountA,
+      sourceAccountId: sourceAccountA,
+      transferDate: "2026-09-20",
+    });
+
+    const archivedSourceService = createService(repository, {
+      accounts: [
+        { ...defaultAccounts()[0], status: "archived" },
+        defaultAccounts()[1],
+        {
+          id: archivedAccountA,
+          name: "Arquivada diferente",
+          status: "archived",
+          type: "checking",
+          userId: userA,
+        },
+        {
+          id: activeReplacementAccountA,
+          name: "Conta ativa nova",
+          status: "active",
+          type: "checking",
+          userId: userA,
+        },
+      ],
+    });
+
+    const amountOnly = await archivedSourceService.updateTransfer(
+      contextA,
+      created.transfer.id,
+      {
+        amount: "101",
+        description: "Mantem origem arquivada",
+        destinationAccountId: destinationAccountA,
+        sourceAccountId: sourceAccountA,
+        transferDate: "2026-09-21",
+      },
+    );
+
+    expect(amountOnly.transfer.sourceAccountId).toBe(sourceAccountA);
+
+    const createdWithClosedDestination = await activeService.createTransfer(
+      contextA,
+      {
+        amount: "50",
+        description: "Destino historico",
+        destinationAccountId: destinationAccountA,
+        sourceAccountId: sourceAccountA,
+        transferDate: "2026-09-22",
+      },
+    );
+    const closedDestinationService = createService(repository, {
+      accounts: [
+        defaultAccounts()[0],
+        { ...defaultAccounts()[1], status: "closed" },
+        {
+          id: closedAccountA,
+          name: "Encerrada diferente",
+          status: "closed",
+          type: "checking",
+          userId: userA,
+        },
+        {
+          id: activeReplacementAccountA,
+          name: "Conta ativa nova",
+          status: "active",
+          type: "checking",
+          userId: userA,
+        },
+      ],
+    });
+
+    await expect(
+      closedDestinationService.updateTransfer(
+        contextA,
+        createdWithClosedDestination.transfer.id,
+        {
+          amount: "51",
+          description: "Mantem destino encerrado",
+          destinationAccountId: destinationAccountA,
+          sourceAccountId: sourceAccountA,
+          transferDate: "2026-09-23",
+        },
+      ),
+    ).resolves.toMatchObject({
+      transfer: { destinationAccountId: destinationAccountA },
+    });
+
+    await expect(
+      archivedSourceService.updateTransfer(contextA, amountOnly.transfer.id, {
+        amount: "102",
+        description: "Troca para arquivada",
+        destinationAccountId: destinationAccountA,
+        sourceAccountId: archivedAccountA,
+        transferDate: "2026-09-24",
+      }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+
+    await expect(
+      closedDestinationService.updateTransfer(
+        contextA,
+        createdWithClosedDestination.transfer.id,
+        {
+          amount: "52",
+          description: "Troca para encerrada",
+          destinationAccountId: closedAccountA,
+          sourceAccountId: sourceAccountA,
+          transferDate: "2026-09-24",
+        },
+      ),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+
+    const activeReplacement = await closedDestinationService.updateTransfer(
+      contextA,
+      amountOnly.transfer.id,
+      {
+        amount: "103",
+        description: "Troca para ativa",
+        destinationAccountId: activeReplacementAccountA,
+        sourceAccountId: sourceAccountA,
+        transferDate: "2026-09-25",
+      },
+    );
+
+    expect(activeReplacement.transfer.destinationAccountId).toBe(
+      activeReplacementAccountA,
+    );
+  });
+
+  it("keeps correction options active-only plus the current historical inactive accounts", async () => {
+    const service = createService(new InMemoryTransferRepository(), {
+      accounts: [
+        { ...defaultAccounts()[0], status: "archived" },
+        defaultAccounts()[1],
+        {
+          id: archivedAccountA,
+          name: "Arquivada diferente",
+          status: "archived",
+          type: "checking",
+          userId: userA,
+        },
+      ],
+    });
+    const transfer = transferRecord({
+      sourceAccountId: sourceAccountA,
+      destinationAccountId: destinationAccountA,
+    });
+
+    await expect(service.listFormOptions(contextA)).resolves.toEqual({
+      accounts: [defaultAccounts()[1]],
+    });
+    await expect(
+      service.listCorrectionOptions(contextA, transfer),
+    ).resolves.toEqual({
+      accounts: [
+        defaultAccounts()[1],
+        { ...defaultAccounts()[0], status: "archived" },
+      ],
+    });
+  });
+
+  it("validates transfer money and LocalDate boundaries without coercion", () => {
+    expect(
+      parseTransferMutation({
+        amount: "0.0100",
+        description: "Minimo",
+        destinationAccountId: destinationAccountA,
+        sourceAccountId: sourceAccountA,
+        transferDate: "2028-02-29",
+      }).amount.amount,
+    ).toBe("0.0100");
+    expect(
+      parseTransferMutation({
+        amount: "123.4567",
+        description: "Precisao",
+        destinationAccountId: destinationAccountA,
+        sourceAccountId: sourceAccountA,
+        transferDate: "2026-09-20",
+      }).amount.amount,
+    ).toBe("123.4567");
+
+    for (const amount of [
+      "123.45678",
+      "0",
+      "-1",
+      "1000000000000000.0000",
+      "1e2",
+      "1,23",
+    ]) {
+      expect(() =>
+        parseTransferMutation({
+          amount,
+          description: "Invalido",
+          destinationAccountId: destinationAccountA,
+          sourceAccountId: sourceAccountA,
+          transferDate: "2026-09-20",
+        }),
+      ).toThrow(DomainError);
+    }
+
+    for (const transferDate of ["2026-02-29", "2026-09-20T00:00:00Z"]) {
+      expect(() =>
+        parseTransferMutation({
+          amount: "1.2300",
+          description: "Data invalida",
+          destinationAccountId: destinationAccountA,
+          sourceAccountId: sourceAccountA,
+          transferDate,
+        }),
+      ).toThrow(DomainError);
+    }
   });
 
   it("rolls back correction when replacement creation fails", async () => {
@@ -260,6 +519,62 @@ describe("TransferService", () => {
 
     expect(created.transfer.id).toBeTruthy();
     expect(repository.transfers).toHaveLength(1);
+  });
+
+  it("records minimized transfer audit metadata without amount or descriptive fields", async () => {
+    const audit = auditRecorder();
+    const repository = new InMemoryTransferRepository();
+    const service = createService(repository, { audit });
+
+    const created = await service.createTransfer(contextA, {
+      amount: "10",
+      description: "Metadata privada",
+      destinationAccountId: destinationAccountA,
+      sourceAccountId: sourceAccountA,
+      transferDate: "2026-09-20",
+    });
+    const reversed = await service.reverseTransfer(
+      contextA,
+      created.transfer.id,
+      { reason: "Duplicado" },
+    );
+    const replacement = await service.createTransfer(contextA, {
+      amount: "20",
+      description: "Corrigir",
+      destinationAccountId: destinationAccountA,
+      sourceAccountId: sourceAccountA,
+      transferDate: "2026-09-21",
+    });
+    await service.updateTransfer(contextA, replacement.transfer.id, {
+      amount: "21",
+      description: "Corrigido",
+      destinationAccountId: destinationAccountA,
+      sourceAccountId: sourceAccountA,
+      transferDate: "2026-09-22",
+    });
+
+    expect(reversed.original.status).toBe("reversed");
+    expect(audit.events.map((event) => event.action)).toEqual([
+      "transfers.create",
+      "transfers.reverse",
+      "transfers.create",
+      "transfers.reverse_for_correction",
+      "transfers.correct",
+    ]);
+
+    for (const event of audit.events) {
+      expect(event.metadata).toEqual(
+        expect.objectContaining({
+          requestId: null,
+          status: expect.any(String),
+        }),
+      );
+      expect(event.metadata).not.toHaveProperty("amount");
+      expect(event.metadata).not.toHaveProperty("description");
+      expect(event.metadata).not.toHaveProperty("sourceAccountName");
+      expect(event.metadata).not.toHaveProperty("destinationAccountName");
+      expect(event.entity?.id).toBeTruthy();
+    }
   });
 });
 
@@ -536,10 +851,10 @@ function balanceImpact(
   transfers: readonly TransferRecord[],
   accountId: string,
 ) {
-  return transfers
+  const total = transfers
     .filter((transfer) => transfer.status === "posted")
     .reduce((total, transfer) => {
-      const amount = Number(transfer.amount.amount);
+      const amount = scaledMoney(transfer.amount.amount);
 
       if (transfer.sourceAccountId === accountId) {
         return total - amount;
@@ -550,14 +865,16 @@ function balanceImpact(
       }
 
       return total;
-    }, 0);
+    }, BigInt(0));
+
+  return formatScaledMoney(total);
 }
 
 function plTotal(transactions: readonly TransactionRecord[]) {
-  return transactions
+  const total = transactions
     .filter((transaction) => transaction.status === "posted")
     .reduce((total, transaction) => {
-      const amount = Number(transaction.amount.amount);
+      const amount = scaledMoney(transaction.amount.amount);
 
       if (transaction.transactionType === "income") {
         return total + amount;
@@ -568,7 +885,49 @@ function plTotal(transactions: readonly TransactionRecord[]) {
       }
 
       return total;
-    }, 0);
+    }, BigInt(0));
+
+  return formatScaledMoney(total);
+}
+
+function scaledMoney(value: string) {
+  const sign = value.startsWith("-") ? -BigInt(1) : BigInt(1);
+  const unsigned = value.startsWith("-") ? value.slice(1) : value;
+  const [integer, fraction = ""] = unsigned.split(".");
+
+  return sign * BigInt(`${integer}${fraction.padEnd(4, "0")}`);
+}
+
+function formatScaledMoney(value: bigint) {
+  const sign = value < BigInt(0) ? "-" : "";
+  const absolute = value < BigInt(0) ? -value : value;
+  const raw = absolute.toString().padStart(5, "0");
+
+  return `${sign}${raw.slice(0, -4)}.${raw.slice(-4)}`;
+}
+
+function transferRecord(
+  overrides: Partial<TransferRecord> = {},
+): TransferRecord {
+  return {
+    amount: { amount: "10.0000" as never, currency: "BRL" },
+    currency: "BRL",
+    description: "Historica",
+    destinationAccountId: destinationAccountA,
+    id: asTransferId("00000000-0000-4000-8000-000000001090"),
+    inflowTransactionId: asTransactionId(
+      "00000000-0000-4000-8000-000000001091",
+    ),
+    originType: "manual",
+    outflowTransactionId: asTransactionId(
+      "00000000-0000-4000-8000-000000001092",
+    ),
+    sourceAccountId: sourceAccountA,
+    status: "posted",
+    transferDate: "2026-09-20" as never,
+    userId: userA,
+    ...overrides,
+  };
 }
 
 function defaultAccounts(): TransferAccountReference[] {

@@ -36,16 +36,22 @@ export default async function TransferDetailPage({
   } catch (error) {
     const publicError = toPublicError(error);
 
-    if (publicError.code === "NOT_FOUND") {
+    if (
+      publicError.code === "NOT_FOUND" ||
+      publicError.code === "VALIDATION_FAILED"
+    ) {
       notFound();
     }
 
     throw error;
   }
 
-  const options = await service.listFormOptions(context);
+  const [displayAccounts, correctionOptions] = await Promise.all([
+    service.listDisplayAccounts(context),
+    service.listCorrectionOptions(context, transfer),
+  ]);
   const accountNames = new Map(
-    options.accounts.map((account) => [account.id, account.name]),
+    displayAccounts.map((account) => [account.id, account.name]),
   );
   const canCorrect =
     transfer.status === "posted" && transfer.originType === "manual";
@@ -115,7 +121,7 @@ export default async function TransferDetailPage({
             <CardContent>
               {canCorrect ? (
                 <TransferForm
-                  accounts={options.accounts}
+                  accounts={correctionOptions.accounts}
                   action={updateTransferAction.bind(null, transfer.id)}
                   submitLabel="Corrigir transferencia"
                   transfer={transfer}

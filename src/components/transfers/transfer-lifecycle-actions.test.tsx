@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { TransferLifecycleActions } from "./transfer-lifecycle-actions";
@@ -14,6 +14,37 @@ describe("TransferLifecycleActions", () => {
     expect(
       screen.getByRole("button", { name: "Estornar transferencia" }),
     ).toBeEnabled();
+  });
+
+  it("opens confirmation, cancels without submit, and confirms by submitting the form", () => {
+    const requestSubmit = vi
+      .spyOn(HTMLFormElement.prototype, "requestSubmit")
+      .mockImplementation(() => undefined);
+
+    render(
+      <TransferLifecycleActions reverseAction={vi.fn()} transfer={transfer} />,
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Estornar transferencia" }),
+    );
+
+    expect(screen.getByRole("dialog")).toHaveAccessibleName(
+      "Estornar transferencia",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancelar" }));
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(requestSubmit).not.toHaveBeenCalled();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Estornar transferencia" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Estornar" }));
+
+    expect(requestSubmit).toHaveBeenCalledTimes(1);
+    requestSubmit.mockRestore();
   });
 
   it("disables reversal for already reversed transfers", () => {

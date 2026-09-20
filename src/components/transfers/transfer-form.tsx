@@ -96,7 +96,7 @@ export function TransferForm({
             <option value="">Selecione</option>
             {accounts.map((account) => (
               <option key={account.id} value={account.id}>
-                {account.name} - {getEnumLabel("account_type", account.type)}
+                {accountOptionLabel(account)}
               </option>
             ))}
           </select>
@@ -116,7 +116,7 @@ export function TransferForm({
             <option value="">Selecione</option>
             {accounts.map((account) => (
               <option key={account.id} value={account.id}>
-                {account.name} - {getEnumLabel("account_type", account.type)}
+                {accountOptionLabel(account)}
               </option>
             ))}
           </select>
@@ -154,6 +154,16 @@ function getInitialState(transfer?: TransferRecord): TransferFormState {
     status: "idle",
     values: getInitialValues(transfer),
   };
+}
+
+function accountOptionLabel(account: TransferAccountReference) {
+  const typeLabel = getEnumLabel("account_type", account.type);
+
+  if (account.status === "active") {
+    return `${account.name} - ${typeLabel}`;
+  }
+
+  return `${account.name} (${getEnumLabel("account_status", account.status)}) - ${typeLabel}`;
 }
 
 function getInitialValues(transfer?: TransferRecord): TransferFormValues {

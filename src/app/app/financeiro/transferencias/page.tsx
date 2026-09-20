@@ -24,12 +24,13 @@ export default async function TransfersPage({ searchParams }: PageProps) {
   );
   const context = { userId: asUserId(user.id) };
   const service = await createTransferService();
-  const [transfers, options] = await Promise.all([
+  const [transfers, displayAccounts, options] = await Promise.all([
     service.listTransfers(context),
+    service.listDisplayAccounts(context),
     service.listFormOptions(context),
   ]);
   const accountNames = new Map(
-    options.accounts.map((account) => [account.id, account.name]),
+    displayAccounts.map((account) => [account.id, account.name]),
   );
   const rows = transfers.map((transfer) => ({
     amount: formatBRL(transfer.amount.amount),

@@ -10,6 +10,7 @@ const migrationPaths = [
   "20260915000200_m04_auth_profiles_authorization_rls.sql",
   "20260920000100_m09_transactions_atomic_rpc.sql",
   "20260920000200_m10_transfers_atomic_rpc.sql",
+  "20260920000300_m10_review_remediation.sql",
 ].map((file) => path.join(repoRoot, "supabase", "migrations", file));
 const seedPath = path.join(repoRoot, "supabase", "seed.sql");
 
@@ -206,6 +207,17 @@ insert into public.accounts (
 )
 values
   (
+    '00000000-0000-4000-8000-000000001980',
+    '00000000-0000-4000-8000-000000001991',
+    'M10 Replacement',
+    'm10-replacement',
+    'checking',
+    0,
+    '2026-09-01',
+    'active',
+    null
+  ),
+  (
     '00000000-0000-4000-8000-000000001993',
     '00000000-0000-4000-8000-000000001991',
     'M10 Source',
@@ -248,7 +260,35 @@ values
     '2026-09-01',
     'active',
     null
+  ),
+  (
+    '00000000-0000-4000-8000-000000001997',
+    '00000000-0000-4000-8000-000000001991',
+    'M10 Closed',
+    'm10-closed',
+    'checking',
+    0,
+    '2026-09-01',
+    'closed',
+    null
   );
+
+insert into public.categories (
+  id,
+  user_id,
+  name,
+  normalized_name,
+  type,
+  sort_order
+)
+values (
+  '00000000-0000-4000-8000-000000001998',
+  '00000000-0000-4000-8000-000000001991',
+  'M10 Runtime Expense',
+  'm10-runtime-expense',
+  'variable_expense',
+  1
+);
 
 set role authenticated;
 set request.jwt.claim.sub = '00000000-0000-4000-8000-000000001991';
@@ -326,6 +366,179 @@ begin
   );
 
   begin
+    perform public.reverse_transaction(
+      (v_created -> 'outflow' ->> 'id')::uuid,
+      'ordinary m09 reversal attempt'
+    );
+    raise exception 'M09 reverse_transaction accepted transfer leg';
+  exception when others then
+    if sqlerrm not like '%m09_transaction_conflict%' then
+      raise;
+    end if;
+  end;
+
+  begin
+    perform public.correct_transaction(
+      (v_created -> 'outflow' ->> 'id')::uuid,
+      'ordinary m09 correction attempt',
+      jsonb_build_object(
+        'amount', '1',
+        'description', 'Should fail',
+        'transaction_type', 'expense',
+        'transaction_date', '2026-09-20',
+        'competence_date', '2026-09-20',
+        'competence_month', '2026-09-01',
+        'category_id', '00000000-0000-4000-8000-000000001998',
+        'payment_method', 'pix',
+        'account_id', '00000000-0000-4000-8000-000000001993'
+      )
+    );
+    raise exception 'M09 correct_transaction accepted transfer leg';
+  exception when others then
+    if sqlerrm not like '%m09_transaction_conflict%' then
+      raise;
+    end if;
+  end;
+
+  perform pg_temp.assert_true(
+    'M09 direct RPC guard leaves transfer row and legs unchanged',
+    exists (
+      select 1
+      from public.transfers
+      where id = v_transfer_id
+        and status = 'posted'
+    )
+      and (
+        select count(*) = 2
+        from public.transactions
+        where transfer_id = v_transfer_id
+          and status = 'posted'
+          and reversal_of_transaction_id is null
+      )
+  );
+
+  insert into public.transactions (
+    id,
+    user_id,
+    transaction_type,
+    status,
+    description,
+    amount,
+    currency,
+    transaction_date,
+    competence_date,
+    competence_month,
+    category_id,
+    payment_method,
+    account_id,
+    origin_type,
+    source_type,
+    posted_at
+  )
+  values (
+    '00000000-0000-4000-8000-000000001981',
+    '00000000-0000-4000-8000-000000001991',
+    'expense',
+    'posted',
+    'M09 ordinary reversal still works',
+    11,
+    'BRL',
+    '2026-09-20',
+    '2026-09-20',
+    '2026-09-01',
+    '00000000-0000-4000-8000-000000001998',
+    'pix',
+    '00000000-0000-4000-8000-000000001993',
+    'manual',
+    'manual',
+    now()
+  );
+
+  perform public.reverse_transaction(
+    '00000000-0000-4000-8000-000000001981',
+    'ordinary m09 reversal'
+  );
+
+  perform pg_temp.assert_eq(
+    'non-transfer M09 reverse still creates one reversal',
+    (
+      select count(*)::numeric
+      from public.transactions
+      where reversal_of_transaction_id = '00000000-0000-4000-8000-000000001981'
+    ),
+    1
+  );
+
+  insert into public.transactions (
+    id,
+    user_id,
+    transaction_type,
+    status,
+    description,
+    amount,
+    currency,
+    transaction_date,
+    competence_date,
+    competence_month,
+    category_id,
+    payment_method,
+    account_id,
+    origin_type,
+    source_type,
+    posted_at
+  )
+  values (
+    '00000000-0000-4000-8000-000000001982',
+    '00000000-0000-4000-8000-000000001991',
+    'expense',
+    'posted',
+    'M09 ordinary correction still works',
+    12,
+    'BRL',
+    '2026-09-20',
+    '2026-09-20',
+    '2026-09-01',
+    '00000000-0000-4000-8000-000000001998',
+    'pix',
+    '00000000-0000-4000-8000-000000001993',
+    'manual',
+    'manual',
+    now()
+  );
+
+  perform public.correct_transaction(
+    '00000000-0000-4000-8000-000000001982',
+    'ordinary m09 correction',
+    jsonb_build_object(
+      'amount', '13',
+      'description', 'M09 ordinary correction replacement',
+      'transaction_type', 'expense',
+      'transaction_date', '2026-09-21',
+      'competence_date', '2026-09-21',
+      'competence_month', '2026-09-01',
+      'category_id', '00000000-0000-4000-8000-000000001998',
+      'payment_method', 'pix',
+      'account_id', '00000000-0000-4000-8000-000000001993'
+    )
+  );
+
+  perform pg_temp.assert_true(
+    'non-transfer M09 correct still reverses original and posts replacement',
+    exists (
+      select 1
+      from public.transactions
+      where id = '00000000-0000-4000-8000-000000001982'
+        and status = 'reversed'
+    )
+      and exists (
+        select 1
+        from public.transactions
+        where description = 'M09 ordinary correction replacement'
+          and status = 'posted'
+    )
+  );
+
+  begin
     perform public.create_transfer(jsonb_build_object(
       'amount', '10',
       'description', 'Same account',
@@ -358,12 +571,57 @@ begin
   begin
     perform public.create_transfer(jsonb_build_object(
       'amount', '10',
-      'description', 'Archived account',
+      'description', 'Archived destination account',
       'source_account_id', '00000000-0000-4000-8000-000000001993',
       'destination_account_id', '00000000-0000-4000-8000-000000001995',
       'transfer_date', '2026-09-20'
     ));
     raise exception 'archived-account transfer was not rejected';
+  exception when others then
+    if sqlerrm not like '%m10_transfer_validation%' then
+      raise;
+    end if;
+  end;
+
+  begin
+    perform public.create_transfer(jsonb_build_object(
+      'amount', '10',
+      'description', 'Archived source account',
+      'source_account_id', '00000000-0000-4000-8000-000000001995',
+      'destination_account_id', '00000000-0000-4000-8000-000000001994',
+      'transfer_date', '2026-09-20'
+    ));
+    raise exception 'archived-source transfer was not rejected';
+  exception when others then
+    if sqlerrm not like '%m10_transfer_validation%' then
+      raise;
+    end if;
+  end;
+
+  begin
+    perform public.create_transfer(jsonb_build_object(
+      'amount', '10',
+      'description', 'Closed source account',
+      'source_account_id', '00000000-0000-4000-8000-000000001997',
+      'destination_account_id', '00000000-0000-4000-8000-000000001994',
+      'transfer_date', '2026-09-20'
+    ));
+    raise exception 'closed-source transfer was not rejected';
+  exception when others then
+    if sqlerrm not like '%m10_transfer_validation%' then
+      raise;
+    end if;
+  end;
+
+  begin
+    perform public.create_transfer(jsonb_build_object(
+      'amount', '10',
+      'description', 'Closed destination account',
+      'source_account_id', '00000000-0000-4000-8000-000000001993',
+      'destination_account_id', '00000000-0000-4000-8000-000000001997',
+      'transfer_date', '2026-09-20'
+    ));
+    raise exception 'closed-destination transfer was not rejected';
   exception when others then
     if sqlerrm not like '%m10_transfer_validation%' then
       raise;
@@ -423,6 +681,150 @@ begin
       and (v_corrected -> 'replacement' -> 'transfer' ->> 'status') = 'posted'
       and (v_corrected -> 'replacement' -> 'transfer' ->> 'amount')::numeric = 120
   );
+
+  v_corrected := public.create_transfer(jsonb_build_object(
+    'amount', '40',
+    'description', 'Runtime archived source original',
+    'source_account_id', '00000000-0000-4000-8000-000000001993',
+    'destination_account_id', '00000000-0000-4000-8000-000000001994',
+    'transfer_date', '2026-09-25'
+  ));
+  v_reversed_transfer_id := (v_corrected -> 'transfer' ->> 'id')::uuid;
+
+  update public.accounts
+  set status = 'archived', archived_at = now()
+  where id = '00000000-0000-4000-8000-000000001993';
+
+  v_corrected := public.correct_transfer(
+    v_reversed_transfer_id,
+    'runtime archived source preserve',
+    jsonb_build_object(
+      'amount', '41',
+      'description', 'Runtime archived source preserved',
+      'source_account_id', '00000000-0000-4000-8000-000000001993',
+      'destination_account_id', '00000000-0000-4000-8000-000000001994',
+      'transfer_date', '2026-09-26'
+    )
+  );
+
+  perform pg_temp.assert_true(
+    'correction may preserve unchanged archived source account',
+    (v_corrected -> 'replacement' -> 'transfer' ->> 'source_account_id')::uuid =
+      '00000000-0000-4000-8000-000000001993'
+  );
+
+  v_corrected := public.create_transfer(jsonb_build_object(
+    'amount', '42',
+    'description', 'Runtime active replacement original',
+    'source_account_id', '00000000-0000-4000-8000-000000001980',
+    'destination_account_id', '00000000-0000-4000-8000-000000001994',
+    'transfer_date', '2026-09-26'
+  ));
+  v_reversed_transfer_id := (v_corrected -> 'transfer' ->> 'id')::uuid;
+
+  begin
+    perform public.correct_transfer(
+      v_reversed_transfer_id,
+      'runtime archived source changed reject',
+      jsonb_build_object(
+        'amount', '43',
+        'description', 'Runtime archived source changed',
+        'source_account_id', '00000000-0000-4000-8000-000000001993',
+        'destination_account_id', '00000000-0000-4000-8000-000000001994',
+        'transfer_date', '2026-09-27'
+      )
+    );
+    raise exception 'changed archived source correction was not rejected';
+  exception when others then
+    if sqlerrm not like '%m10_transfer_validation%' then
+      raise;
+    end if;
+  end;
+
+  v_corrected := public.correct_transfer(
+    v_reversed_transfer_id,
+    'runtime active replacement succeeds',
+    jsonb_build_object(
+      'amount', '44',
+      'description', 'Runtime active replacement succeeds',
+      'source_account_id', '00000000-0000-4000-8000-000000001980',
+      'destination_account_id', '00000000-0000-4000-8000-000000001994',
+      'transfer_date', '2026-09-28'
+    )
+  );
+
+  perform pg_temp.assert_true(
+    'correction may change to an active replacement account',
+    (v_corrected -> 'replacement' -> 'transfer' ->> 'source_account_id')::uuid =
+      '00000000-0000-4000-8000-000000001980'
+  );
+
+  update public.accounts
+  set status = 'active', archived_at = null
+  where id = '00000000-0000-4000-8000-000000001993';
+
+  v_corrected := public.create_transfer(jsonb_build_object(
+    'amount', '45',
+    'description', 'Runtime closed destination original',
+    'source_account_id', '00000000-0000-4000-8000-000000001993',
+    'destination_account_id', '00000000-0000-4000-8000-000000001994',
+    'transfer_date', '2026-09-29'
+  ));
+  v_reversed_transfer_id := (v_corrected -> 'transfer' ->> 'id')::uuid;
+
+  update public.accounts
+  set status = 'closed'
+  where id = '00000000-0000-4000-8000-000000001994';
+
+  v_corrected := public.correct_transfer(
+    v_reversed_transfer_id,
+    'runtime closed destination preserve',
+    jsonb_build_object(
+      'amount', '46',
+      'description', 'Runtime closed destination preserved',
+      'source_account_id', '00000000-0000-4000-8000-000000001993',
+      'destination_account_id', '00000000-0000-4000-8000-000000001994',
+      'transfer_date', '2026-09-30'
+    )
+  );
+
+  perform pg_temp.assert_true(
+    'correction may preserve unchanged closed destination account',
+    (v_corrected -> 'replacement' -> 'transfer' ->> 'destination_account_id')::uuid =
+      '00000000-0000-4000-8000-000000001994'
+  );
+
+  v_corrected := public.create_transfer(jsonb_build_object(
+    'amount', '47',
+    'description', 'Runtime closed change original',
+    'source_account_id', '00000000-0000-4000-8000-000000001993',
+    'destination_account_id', '00000000-0000-4000-8000-000000001980',
+    'transfer_date', '2026-10-01'
+  ));
+  v_reversed_transfer_id := (v_corrected -> 'transfer' ->> 'id')::uuid;
+
+  begin
+    perform public.correct_transfer(
+      v_reversed_transfer_id,
+      'runtime closed destination changed reject',
+      jsonb_build_object(
+        'amount', '48',
+        'description', 'Runtime closed destination changed',
+        'source_account_id', '00000000-0000-4000-8000-000000001993',
+        'destination_account_id', '00000000-0000-4000-8000-000000001994',
+        'transfer_date', '2026-10-02'
+      )
+    );
+    raise exception 'changed closed destination correction was not rejected';
+  exception when others then
+    if sqlerrm not like '%m10_transfer_validation%' then
+      raise;
+    end if;
+  end;
+
+  update public.accounts
+  set status = 'active'
+  where id = '00000000-0000-4000-8000-000000001994';
 
   v_failed := public.create_transfer(jsonb_build_object(
     'amount', '70',
@@ -531,6 +933,78 @@ begin
     if sqlerrm not like '%m10_transfer_conflict%' then
       raise;
     end if;
+  end;
+end;
+$$;
+
+set role authenticated;
+set request.jwt.claim.sub = '';
+
+do $$
+begin
+  begin
+    perform public.create_transfer('{}'::jsonb);
+    raise exception 'authenticated without sub create_transfer was not rejected';
+  exception when others then
+    if sqlerrm not like '%m10_transfer_validation%' then
+      raise;
+    end if;
+  end;
+end;
+$$;
+
+set role anon;
+set request.jwt.claim.sub = '';
+
+do $$
+begin
+  begin
+    perform public.create_transfer('{}'::jsonb);
+    raise exception 'anon create_transfer was not rejected';
+  exception when insufficient_privilege then
+    null;
+  end;
+
+  begin
+    perform public.reverse_transfer(
+      '00000000-0000-4000-8000-000000001981',
+      'anon'
+    );
+    raise exception 'anon reverse_transfer was not rejected';
+  exception when insufficient_privilege then
+    null;
+  end;
+
+  begin
+    perform public.correct_transfer(
+      '00000000-0000-4000-8000-000000001981',
+      'anon',
+      '{}'::jsonb
+    );
+    raise exception 'anon correct_transfer was not rejected';
+  exception when insufficient_privilege then
+    null;
+  end;
+
+  begin
+    perform public.reverse_transaction(
+      '00000000-0000-4000-8000-000000001981',
+      'anon'
+    );
+    raise exception 'anon reverse_transaction was not rejected';
+  exception when insufficient_privilege then
+    null;
+  end;
+
+  begin
+    perform public.correct_transaction(
+      '00000000-0000-4000-8000-000000001981',
+      'anon',
+      '{}'::jsonb
+    );
+    raise exception 'anon correct_transaction was not rejected';
+  exception when insufficient_privilege then
+    null;
   end;
 end;
 $$;
