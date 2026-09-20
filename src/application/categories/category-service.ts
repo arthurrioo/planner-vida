@@ -1,7 +1,7 @@
-import { AccountService } from "@/domain/accounts";
+import { CategoryService } from "@/domain/categories";
 import { type Logger } from "@/domain/shared";
 import { SupabasePrivilegedAuditService } from "@/infrastructure/audit";
-import { SupabaseAccountRepository } from "@/infrastructure/accounts";
+import { SupabaseCategoryRepository } from "@/infrastructure/categories";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 
 const serverLogger: Logger = {
@@ -10,12 +10,12 @@ const serverLogger: Logger = {
   },
 };
 
-export async function createAccountService() {
+export async function createCategoryService() {
   const supabase = await createServerSupabaseClient();
 
-  return new AccountService({
+  return new CategoryService({
     audit: new SupabasePrivilegedAuditService(),
     logger: serverLogger,
-    repository: new SupabaseAccountRepository(supabase),
+    repository: new SupabaseCategoryRepository(supabase),
   });
 }
