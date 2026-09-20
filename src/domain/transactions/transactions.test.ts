@@ -714,6 +714,7 @@ class InMemoryTransactionRepository implements TransactionRepository {
       sourceType: mutation.sourceType,
       status: mutation.status,
       subcategoryId: mutation.subcategoryId,
+      transferId: null,
       transactionDate: mutation.transactionDate,
       transactionType: mutation.transactionType,
       userId: context.userId,

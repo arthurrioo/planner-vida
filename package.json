@@ -21,6 +21,7 @@
     "verify:runtime:m07:accounts": "node scripts/run-m07-accounts-runtime-harness.mjs",
     "verify:runtime:m08:categories": "node scripts/run-m08-categories-runtime-harness.mjs",
     "verify:runtime:m09:transactions": "node scripts/run-m09-transactions-runtime-harness.mjs",
+    "verify:runtime:m10:transfers": "node scripts/run-m10-transfers-runtime-harness.mjs",
     "check:secrets": "node scripts/check-secrets.mjs",
     "typecheck": "tsc --project tsconfig.json --noEmit",
     "test": "vitest run",

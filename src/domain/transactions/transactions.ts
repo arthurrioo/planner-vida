@@ -28,6 +28,7 @@ import {
 } from "@/domain/shared";
 import type { AccountId } from "@/domain/accounts";
 import type { CategoryId } from "@/domain/categories";
+import type { TransferId } from "@/domain/transfers";
 
 export type TransactionId = string & { readonly __brand: "TransactionId" };
 export type CreditCardId = string & { readonly __brand: "CreditCardId" };
@@ -56,6 +57,7 @@ export type TransactionRecord = Readonly<{
   sourceType: string | null;
   status: TransactionStatus;
   subcategoryId: CategoryId | null;
+  transferId: TransferId | null;
   transactionDate: LocalDate;
   transactionType: TransactionType;
   updatedAt?: string;
@@ -313,10 +315,14 @@ export class TransactionService {
   ) {
     const existing = await this.requireTransaction(context, id);
 
-    if (existing.status !== "posted" || existing.originType !== "manual") {
+    if (
+      existing.status !== "posted" ||
+      existing.originType !== "manual" ||
+      existing.transactionType === "transfer"
+    ) {
       throw new DomainError(
         "CONFLICT",
-        "Only manual posted transactions can be corrected in Milestone 09.",
+        "Only manual posted non-transfer transactions can be corrected in Milestone 09.",
         { details: { transactionId: id } },
       );
     }
@@ -773,10 +779,14 @@ export function toCompetenceMonth(value: LocalDate): LocalDate {
 }
 
 function assertPostedManual(transaction: TransactionRecord) {
-  if (transaction.status !== "posted" || transaction.originType !== "manual") {
+  if (
+    transaction.status !== "posted" ||
+    transaction.originType !== "manual" ||
+    transaction.transactionType === "transfer"
+  ) {
     throw new DomainError(
       "CONFLICT",
-      "Only manual posted transactions can be voided or reversed.",
+      "Only manual posted non-transfer transactions can be voided or reversed.",
       { details: { transactionId: transaction.id } },
     );
   }
