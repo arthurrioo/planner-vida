@@ -48,6 +48,24 @@ export default function FinanceiroPage() {
               </Link>
             </CardContent>
           </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Transacoes</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-muted-foreground mb-4 text-sm leading-6">
+                Registre fatos financeiros realizados com conta, categoria,
+                competencia e reversao auditavel.
+              </p>
+              <Link
+                className="bg-primary text-primary-foreground hover:bg-primary/90 inline-flex h-10 items-center justify-center rounded-md px-4 text-sm font-medium"
+                href="/app/financeiro/transacoes"
+              >
+                Abrir transacoes
+              </Link>
+            </CardContent>
+          </Card>
         </div>
       </ModulePage>
     </ProtectedAppShell>
