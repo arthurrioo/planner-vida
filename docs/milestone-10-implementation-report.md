@@ -64,7 +64,7 @@ Commits:
 
 - `e2280f1` - `feat: implement milestone 10 transfers`
 
-Pull Request: pending at first report commit; final PR URL will be added before handoff.
+Pull Request: https://github.com/arthurrioo/planner-vida/pull/9
 
 ## 3. Files Changed
 
