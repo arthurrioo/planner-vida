@@ -85,8 +85,10 @@ Transactions Freeze.
 
 - Branch: `milestone-09-transactions`
 - Baseline: `main` at `da48f4e` (`Merge pull request #7 from arthurrioo/milestone-08-categories-subcategories`)
-- Commit: pending at report creation time
-- PR: pending at report creation time
+- Commits:
+  - `d1cfaa9` - `feat: implement milestone 09 transactions`
+  - current report metadata commit - `docs: update milestone 09 report metadata`
+- PR: https://github.com/arthurrioo/planner-vida/pull/8
 
 ## 3. Files Changed
 
