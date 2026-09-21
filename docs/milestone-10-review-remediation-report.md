@@ -4,122 +4,179 @@
 
 - Branch: `milestone-10-transfers`
 - PR: #9, `Milestone 10 - Transfers`
-- Original HEAD: `f12a55d`
-- Original commits preserved: `e2280f1`, `4888670`, `f12a55d`
-- Remediation commit: `764d75f` (`fix: remediate milestone 10 review findings`)
-- Final validation/report commit: this report update commit in Git history
-- Push status: `764d75f` was pushed to `origin/milestone-10-transfers`; final push status is confirmed in the handoff evidence after this report update is committed and pushed
-- Merge and squash: not performed
+- Reviewed remediation baseline: `3168674f519945491c08318ee33a3eac957c9662`
+- Original M10 commits preserved: `e2280f1`, `4888670`, `f12a55d`
+- Prior remediation commits preserved: `764d75f`, `3168674`
+- Final F6/N1 remediation changes: committed after `3168674` on the same branch
+- Merge, squash, force-push, and self-approval: not performed
 
-## 2. F1: M09 RPC guard hardening
+## 2. Scope of This Finalization
 
-Added an additive M10 remediation migration that recreates `reverse_transaction` and `correct_transaction` only to reject rows whose `transaction_type = 'transfer'` or whose `transfer_id IS NOT NULL`. The guard runs before any reversal or correction insert/update, returns the existing conflict mapping, and preserves the non-transfer M09 path, ownership checks, posted/reversed semantics, atomicity, and `SECURITY INVOKER` behavior.
+This finalization is limited to the focused independent re-review findings F6 and N1. No product code, RPC logic, migrations, schema redesign, M11+ work, frozen planning documents, or `Markdown Files/` content was changed.
 
-The TypeScript transaction service also rejects transfer-owned rows for update, void, reverse, and correct. Focused tests cover the service boundary and the runtime harness covers direct RPC reverse/correct denial, unchanged transfer state, and successful non-transfer M09 reverse/correct behavior. This is documented as M09 corrective hardening discovered during the M10 review.
+The only code change is in `scripts/run-m10-transfers-runtime-harness.mjs`. This expands committed runtime evidence for existing M10 behavior. The report was updated to reflect only evidence that exists in committed files and was executed locally.
 
-## 3. F2, F3, and F4: UI and historical display
+## 3. F6 Harness Coverage Added
 
-- `TransferStatusMessage` now uses `role="alert"` for errors and `role="status"` for success/info states, with explicit component coverage.
-- Invalid transfer route IDs, including malformed UUIDs, are translated to `notFound()` instead of leaking a database error. A focused route test covers this behavior.
-- Historical list/detail display resolves names from all owned accounts, including archived and closed accounts. New-transfer selectors remain active-only.
-- Correction selectors include only active accounts plus the current historical source/destination, with status labels for inactive historical references.
+`verify:runtime:m10:transfers` now covers these focused gaps with persisted rows in disposable PostgreSQL:
 
-## 4. F5: historical inactive account correction rule
+- create with destination account owned by another user -> rejected
+- create with source account owned by another user -> rejected
+- forged `user_id` payload -> `auth.uid()` wins and no forged ownership persists
+- owner reassignment by `UPDATE transfers SET user_id = other_user` -> denied by RLS
+- hard-delete of posted transfer leg -> zero rows affected
+- hard-delete of posted transfer row -> zero rows affected
+- cross-user `reverse_transfer` with a known User A transfer id -> denied
+- cross-user `correct_transfer` with a known User A transfer id -> denied
+- sequential repeat `reverse_transfer` -> explicit `m10_transfer_conflict`
+- direct M09 lifecycle RPCs on M10 transfer legs -> explicit `m09_transaction_conflict`
+- anon and authenticated-without-sub RPC access -> denied
 
-Correction now follows the Control Tower decision: an unchanged original source or destination may remain archived or closed; a changed target must be active. The database RPC and service enforce the same distinction. Reverse remains available independently of the account's current lifecycle state.
+The earlier inline SQL balance-impact checks remain only as local rollback/fixture assertions inside the runtime harness. They are not presented as the primary M07 balance-integration evidence.
 
-Tests cover archived-source amount-only correction, closed-destination amount-only correction, rejection of changed archived/closed targets, successful active replacement, and preservation of historical IDs/options in the UI.
+## 4. Deterministic Concurrency Evidence
 
-## 5. F6: runtime harness
+The previous timing-assisted concurrency check was strengthened. The harness now starts one `psql` client, waits for a deterministic PostgreSQL `NOTICE` emitted from a disposable trigger inside the first transaction, and only then starts the opposing client while the first transaction is deliberately held open.
 
-`verify:runtime:m10:transfers` now covers ownership, exact two-leg linkage, same-account rejection, cross-user source/destination denial, forged-user handling, owner reassignment denial, anonymous and missing-subject denial, inactive create rejection, repeat reverse conflict, cross-user reverse/correct denial, hard-delete blocking, direct M09 RPC guards, audit behavior, historical correction rules, barrier-assisted concurrent lifecycle races, and explicit mid-step rollback probes.
+Covered races:
 
-The harness applies the remediation migration in a disposable PostgreSQL database and verifies rollback for invalid correction/replacement paths and injected mid-step failures. The concurrency probes use parallel `psql` clients plus a disposable `pg_sleep` trigger on transfer status reversal to force real overlap while preserving a one-winner/one-conflict contract.
+- `reverse_transfer` vs `reverse_transfer`
+- `correct_transfer` vs `correct_transfer`
+- `reverse_transfer` vs `correct_transfer`
 
-## 6. F7: unit, component, and integration coverage
+For each race, the harness asserts:
 
-Added discriminating coverage for Money boundaries, LocalDate validation, closed-account create rejection, historical inactive correction, repeat reverse, cross-user access, audit non-blocking behavior and minimized metadata, confirmation dialog cancel/confirm behavior, status roles, historical labels, malformed route IDs, and M09 transfer lifecycle guards.
+- exactly one terminal winner
+- exactly one `m10_transfer_conflict` loser
+- the original lifecycle has a single terminal outcome
+- no duplicate reversal/correction effect survives
+- no orphan or partial lifecycle state survives
 
-Added a focused balance integration test that calls the real M07 `getBalanceMovements` and `calculateAccountBalance` code over persisted transfer rows. Financial expectations use exact scaled values rather than JavaScript `Number` arithmetic.
+## 5. Full Fault-Injection Matrix
 
-## 7. Balance integration and P&L isolation
+The harness now installs disposable triggers that fail after the transaction has begun and after specific intermediate steps. For every failpoint, it captures a before-state snapshot, forces the failure, and proves rollback by comparing row counts and posted balance impact after the failed operation. It also checks transfer status and absence of partial rows where applicable.
 
-The integration test proves the source and destination balances are affected exactly once by the persisted transfer rows. It also verifies the rows are `transaction_type = 'transfer'`, use `payment_method = 'bank_transfer'`, have no category, and do not enter the M09 income/expense/investment classification helpers.
+Covered failpoints:
 
-## 8. Linked-leg integrity
+| Operation | Forced failure point           | Rollback evidence                                                                    |
+| --------- | ------------------------------ | ------------------------------------------------------------------------------------ |
+| create    | outflow leg insert             | no transfer row, no movement rows, counts/balances unchanged                         |
+| create    | inflow leg insert              | no partial transfer/movement rows, counts/balances unchanged                         |
+| create    | linkage update                 | no partial transfer/movement rows, counts/balances unchanged                         |
+| reverse   | second reversal leg insert     | original remains posted, no reversal rows, counts/balances unchanged                 |
+| reverse   | original leg update            | original remains posted, no reversal rows, counts/balances unchanged                 |
+| reverse   | transfer status update         | original remains posted, counts/balances unchanged                                   |
+| correct   | replacement transfer insert    | original remains posted, no reversal rows, no replacement, counts/balances unchanged |
+| correct   | replacement outflow leg insert | original remains posted, no replacement rows, counts/balances unchanged              |
+| correct   | replacement inflow leg insert  | original remains posted, no replacement rows, counts/balances unchanged              |
+| correct   | replacement linkage update     | original remains posted, no replacement rows, counts/balances unchanged              |
+| correct   | original status update         | original remains posted, no replacement, counts/balances unchanged                   |
 
-The runtime and integration tests verify two posted linked legs per transfer, both directions of linkage, no orphan transfer lifecycle rows, and atomic preservation of the original transfer when a correction/reversal path fails.
+## 6. Real M07 Balance Integration
 
-## 9. Concurrency and fault-injection evidence
+The runtime harness now includes a committed real integration test that uses:
 
-Executed in `npm run verify:runtime:m10:transfers` against disposable local PostgreSQL:
+- rows persisted in disposable PostgreSQL through the real M10 RPCs
+- the real `SupabaseAccountRepository.getBalanceMovements`
+- the real `calculateAccountBalance`
+- exact scaled Money string assertions, not JavaScript `Number` arithmetic
 
-- `reverse_transfer` vs `reverse_transfer`: two parallel clients target the same posted transfer; exactly one succeeds, exactly one receives `m10_transfer_conflict`, the original transfer is reversed once, and exactly two reversal movement rows exist.
-- `correct_transfer` vs `correct_transfer`: two parallel clients target the same posted transfer with different replacements; exactly one succeeds, exactly one receives `m10_transfer_conflict`, the original has exactly two reversal movement rows, and exactly one replacement transfer is posted.
-- `reverse_transfer` vs `correct_transfer`: parallel clients target the same posted transfer; exactly one succeeds, exactly one receives `m10_transfer_conflict`, exactly two reversal movement rows exist, and the correction replacement count is constrained to zero or one depending on the winning operation.
-- `create_transfer` mid-step rollback: a disposable trigger fails the second movement insert; the transfer row and both movement rows are absent after rollback.
-- `reverse_transfer` mid-step rollback: a disposable trigger fails the second reversal movement insert; the original transfer remains posted, the original two movement rows remain posted, and no reversal rows survive.
-- `correct_transfer` mid-step rollback: a disposable trigger fails after the original reversal path and before replacement persistence; the original transfer remains posted, no reversal rows survive, and no replacement transfer survives.
+Scenario executed:
 
-## 10. Ownership and RLS matrix
+| Step                           | Expected A | Expected B | Expected C |   Combined |
+| ------------------------------ | ---------: | ---------: | ---------: | ---------: |
+| Initial                        | `100.0000` |  `20.0000` |   `0.0000` | `120.0000` |
+| Transfer A -> B = 30           |  `70.0000` |  `50.0000` |   `0.0000` | `120.0000` |
+| Reverse                        | `100.0000` |  `20.0000` |   `0.0000` | `120.0000` |
+| New A -> B = 30, correct to 10 |  `90.0000` |  `30.0000` |   `0.0000` | `120.0000` |
+| Destination change B -> C      |  `90.0000` |  `20.0000` |  `10.0000` | `120.0000` |
 
-| Case                                               | Expected result             | Covered                     |
-| -------------------------------------------------- | --------------------------- | --------------------------- |
-| Owner creates/reads/reverses/corrects own transfer | Allowed                     | Service and M10 runtime     |
-| Cross-user source or destination                   | Denied                      | M10 runtime                 |
-| Forged `user_id` payload                           | Server identity wins/denied | M10 runtime                 |
-| Owner reassignment                                 | Denied                      | M10 runtime                 |
-| Anonymous RPC call                                 | Denied                      | M10 runtime and grants      |
-| Authenticated role without `sub`                   | Denied                      | M10 runtime                 |
-| Direct M09 lifecycle on transfer leg               | Conflict/denied             | Service, migration, runtime |
+Additional assertions prove:
 
-## 11. Audit minimization
+- reversal lifecycle rows are not double-counted
+- original reversed transfers do not remain posted balance effects
+- the final replacement posted transfer is the only surviving correction effect
+- the final posted replacement has exactly two linked transfer legs with `transaction_type = 'transfer'`, `payment_method = 'bank_transfer'`, and no category
+- combined balance remains invariant at `120.0000`
 
-Transfer audit metadata no longer includes amount, account names, descriptions, or other unnecessary financial detail. It retains only identifiers and minimal lifecycle state needed for traceability. Tests cover `transfers.create`, `transfers.reverse`, `transfers.reverse_for_correction`, and `transfers.correct`, and preserve non-blocking audit failure behavior.
+## 7. P&L / Reporting Isolation
 
-## 12. F8-F14 treatment
+No reporting module exists yet for future income/expense P&L behavior. This report therefore does not claim report-level behavior.
 
-- F8 deterministic account lock ordering: deferred; no broad RPC rewrite was introduced.
-- F9 direct RPC input strictness: existing service validation retained; systemic redesign deferred.
-- F10 audit amount: implemented and tested.
-- F11 grants: anonymous execution is explicitly revoked; intended authenticated outer RPCs remain granted; the internal payload helper is not granted to authenticated.
-- F12-F14: deferred as minor/future items and not expanded.
+The structural evidence is:
 
-## 13. Validation and regression status
+- transfer legs are persisted as `transaction_type = 'transfer'`
+- transfer legs use `payment_method = 'bank_transfer'`
+- transfer legs have no category/subcategory
+- ordinary M09 lifecycle RPCs reject transfer legs
+- M07 balance integration uses transfer-specific buckets through `getBalanceMovements`
 
-Passed in this remediation session:
+## 8. N1 Report Corrections
 
-- `npm ci`
-- `npm run validate:env:ci`
-- `npm run check:secrets`
-- `npm run format:check`
-- `npm run lint`
-- `npm run typecheck`
-- `npm run typecheck:e2e`
-- `npm run test` — 42 files, 193 tests passed
-- `npm run build`
-- `npm run verify:schema:m03`
-- `npm run verify:runtime:m03:pg` — passed outside the sandbox in a disposable PostgreSQL process
+N1 is corrected by aligning this report with committed and executed evidence:
+
+- harness coverage now describes only probes committed in `scripts/run-m10-transfers-runtime-harness.mjs`
+- balance integration is described only after adding the real `SupabaseAccountRepository.getBalanceMovements` + `calculateAccountBalance` path over PostgreSQL-persisted M10 rows
+- the internal helper grant is corrected: `m10_insert_transfer_from_payload(jsonb)` remains executable by `authenticated`
+
+## 9. Helper Grant / N2
+
+`m10_insert_transfer_from_payload(jsonb)` remains:
+
+- granted to `authenticated`
+- `SECURITY INVOKER`
+- governed by `auth.uid()` semantics
+- constrained by the same user-owned account checks as `create_transfer`
+
+No additional cross-user exposure was found in the focused evidence. Because the independent re-review classified the residual helper exposure as MINOR/FUTURE N2 and explicitly stated no migration change was required for this work, the helper grant was not changed.
+
+## 10. Items Preserved
+
+Preserved without reopening:
+
+- F1 M09 RPC transfer-leg guard
+- F2 transfer status alert/status roles
+- F3 malformed transfer id -> 404-like handling
+- F4 historical account names
+- F5 unchanged archived/closed account correction semantics
+- F7 existing unit/component coverage, except for the balance integration gap closed under F6
+- F10 audit minimization
+- F11 anon revocation
+- F8/F9/F12/F13/F14 deferred MINOR/FUTURE
+- N2/N3 MINOR/FUTURE
+
+## 11. Validation Status
+
+Executed after the F6/N1 harness expansion:
+
+- `npm ci` — passed
+- `npm run validate:env:ci` — passed
+- `npm run check:secrets` — passed
+- `npm run format:check` — passed
+- `npm run lint` — passed
+- `npm run typecheck` — passed
+- `npm run typecheck:e2e` — passed
+- `npm run test` — passed, 42 files / 193 tests
+- `npm run build` — passed
+- `npm run test:e2e` — passed outside the sandbox, 14 tests, after the sandbox failed to bind `0.0.0.0:3000`
+- `npm run verify:schema:m03` — passed
+- `npm run verify:runtime:m03:pg` — passed outside the sandbox in disposable PostgreSQL, 2 clean reset cycles
 - `npm run verify:runtime:m04:auth` — passed outside the sandbox in disposable PostgreSQL, 2 clean reset cycles
 - `npm run verify:runtime:m07:accounts` — passed outside the sandbox in disposable PostgreSQL
 - `npm run verify:runtime:m08:categories` — passed outside the sandbox in disposable PostgreSQL
-- `npm run verify:runtime:m09:transactions` — passed outside the sandbox in disposable PostgreSQL, including M09 concurrent reversal check
-- `npm run verify:runtime:m10:transfers` — passed outside the sandbox in disposable PostgreSQL, including M10 concurrency and fault-injection probes
-- `npm run test:e2e` — 14 passed outside the sandbox after sandbox port binding was denied
-- `git diff --check`
+- `npm run verify:runtime:m09:transactions` — passed outside the sandbox in disposable PostgreSQL
+- `npm run verify:runtime:m10:transfers` — passed outside the sandbox in disposable PostgreSQL, including deterministic concurrency, the full fault-injection matrix, and real M07 balance integration
+- `node --check scripts/run-m10-transfers-runtime-harness.mjs` — passed
 
-Environment notes:
+Sandbox limitations encountered and rerun outside the sandbox:
 
-- The first sandbox run of M04 failed at PostgreSQL shared memory creation (`shmget ... Operation not permitted`); the rerun outside the sandbox passed against local disposable PostgreSQL.
-- The first sandbox run of E2E failed to bind `0.0.0.0:3000` with `EPERM`; the rerun outside the sandbox passed.
-- No hosted Supabase/GoTrue or production database was touched.
+- PostgreSQL disposable runtime harnesses require shared memory not available in the sandbox.
+- Playwright E2E requires binding the local web server to port 3000, which the sandbox denied.
 
-## 14. Frozen-surface boundary
+## 12. Remaining Limitations
 
-No frozen planning/architecture/specification documents, `Markdown Files/`, M11+ work, table/column/enum redesign, RLS weakening, or unrelated M07/M08/M09 refactor was introduced.
+- Hosted Supabase/GoTrue was not exercised.
+- No production database was touched.
+- Helper authenticated execution remains tracked as MINOR/FUTURE N2.
 
-## 15. Remaining risks and recommendation
-
-The implementation and focused M10 evidence cover the requested F1-F7 behavioral fixes, with F10/F11 hardening included. The previously missing M04/M07/M08/M09 runtime, E2E, and M10 concurrency/fault-injection gates have now been executed and passed locally against disposable runtime targets. Remaining limitation: hosted Supabase/GoTrue was not exercised.
-
-READY FOR INDEPENDENT MILESTONE 10 RE-REVIEW
+READY FOR INDEPENDENT MILESTONE 10 FINAL RE-REVIEW
