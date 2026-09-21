@@ -40,7 +40,11 @@ export default async function TransactionsPage({ searchParams }: PageProps) {
     description: (
       <Link
         className="text-primary font-semibold hover:underline"
-        href={`/app/financeiro/transacoes/${transaction.id}`}
+        href={
+          transaction.transactionType === "transfer" && transaction.transferId
+            ? `/app/financeiro/transferencias/${transaction.transferId}`
+            : `/app/financeiro/transacoes/${transaction.id}`
+        }
       >
         {transaction.description}
       </Link>

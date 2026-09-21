@@ -66,6 +66,24 @@ export default function FinanceiroPage() {
               </Link>
             </CardContent>
           </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Transferencias</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-muted-foreground mb-4 text-sm leading-6">
+                Movimente saldo entre contas proprias com criacao atomica e
+                exclusao de P&L.
+              </p>
+              <Link
+                className="bg-primary text-primary-foreground hover:bg-primary/90 inline-flex h-10 items-center justify-center rounded-md px-4 text-sm font-medium"
+                href="/app/financeiro/transferencias"
+              >
+                Abrir transferencias
+              </Link>
+            </CardContent>
+          </Card>
         </div>
       </ModulePage>
     </ProtectedAppShell>

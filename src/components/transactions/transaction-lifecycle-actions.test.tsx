@@ -54,6 +54,7 @@ const transaction: TransactionRecord = {
   sourceType: "manual",
   status: "posted",
   subcategoryId: null,
+  transferId: null,
   transactionDate: "2026-09-20" as never,
   transactionType: "expense",
   userId: "00000000-0000-4000-8000-000000000004" as never,

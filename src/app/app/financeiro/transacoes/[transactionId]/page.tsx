@@ -53,7 +53,9 @@ export default async function TransactionDetailPage({
 
   const options = await service.listFormOptions(context);
   const canCorrect =
-    transaction.status === "posted" && transaction.originType === "manual";
+    transaction.status === "posted" &&
+    transaction.originType === "manual" &&
+    transaction.transactionType !== "transfer";
 
   return (
     <ProtectedAppShell nextPath={path}>
@@ -109,16 +111,39 @@ export default async function TransactionDetailPage({
                     value={transaction.reversalReason}
                   />
                 ) : null}
+                {transaction.transferId ? (
+                  <SummaryItem
+                    label="Transferencia"
+                    value={transaction.transferId}
+                  />
+                ) : null}
               </dl>
 
-              <TransactionLifecycleActions
-                reverseAction={reverseTransactionAction.bind(
-                  null,
-                  transaction.id,
-                )}
-                transaction={transaction}
-                voidAction={voidTransactionAction.bind(null, transaction.id)}
-              />
+              {transaction.transactionType === "transfer" ? (
+                <div className="border-border mt-5 border-t pt-4">
+                  {transaction.transferId ? (
+                    <Link
+                      className="bg-primary text-primary-foreground hover:bg-primary/90 inline-flex h-10 items-center justify-center rounded-md px-4 text-sm font-medium"
+                      href={`/app/financeiro/transferencias/${transaction.transferId}`}
+                    >
+                      Abrir transferencia
+                    </Link>
+                  ) : (
+                    <p className="text-muted-foreground text-sm leading-6">
+                      Linha de transferencia sem vinculo disponivel.
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <TransactionLifecycleActions
+                  reverseAction={reverseTransactionAction.bind(
+                    null,
+                    transaction.id,
+                  )}
+                  transaction={transaction}
+                  voidAction={voidTransactionAction.bind(null, transaction.id)}
+                />
+              )}
 
               <Link
                 className="hover:bg-muted mt-5 inline-flex h-10 items-center justify-center rounded-md px-4 text-sm font-medium"
@@ -146,8 +171,9 @@ export default async function TransactionDetailPage({
               ) : (
                 <p className="text-muted-foreground text-sm leading-6">
                   Apenas transacoes manuais postadas podem ser corrigidas pela
-                  M09. Registros anulados, revertidos ou de origem automatica
-                  ficam preservados para auditoria.
+                  M09. Transferencias usam o fluxo atomico proprio da M10.
+                  Registros anulados, revertidos ou de origem automatica ficam
+                  preservados para auditoria.
                 </p>
               )}
             </CardContent>

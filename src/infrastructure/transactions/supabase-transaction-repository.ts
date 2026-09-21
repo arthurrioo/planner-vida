@@ -28,6 +28,7 @@ import {
   type OriginType,
   type RepositoryContext,
 } from "@/domain/shared";
+import { asTransferId } from "@/domain/transfers";
 
 type TransactionRow = Readonly<{
   account_id: string | null;
@@ -53,6 +54,7 @@ type TransactionRow = Readonly<{
   source_type: string | null;
   status: string;
   subcategory_id: string | null;
+  transfer_id: string | null;
   transaction_date: string;
   transaction_type: string;
   updated_at?: string;
@@ -377,6 +379,7 @@ const transactionColumns = [
   "competence_month",
   "category_id",
   "subcategory_id",
+  "transfer_id",
   "payment_method",
   "account_id",
   "credit_card_id",
@@ -465,6 +468,7 @@ function mapTransactionRow(row: TransactionRow): TransactionRecord {
     sourceType: row.source_type,
     status: row.status,
     subcategoryId: row.subcategory_id ? asCategoryId(row.subcategory_id) : null,
+    transferId: row.transfer_id ? asTransferId(row.transfer_id) : null,
     transactionDate: parseLocalDate(row.transaction_date),
     transactionType: row.transaction_type,
     updatedAt: row.updated_at,
