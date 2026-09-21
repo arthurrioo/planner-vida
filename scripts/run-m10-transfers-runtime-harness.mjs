@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 
 const repoRoot = process.cwd();
 const migrationPaths = [
@@ -71,6 +71,641 @@ function psqlFile(port, database, filePath) {
     "--file",
     filePath,
   ]);
+}
+
+function runPsqlFileAsync(port, database, filePath) {
+  return new Promise((resolve) => {
+    const child = spawn(
+      "psql",
+      [
+        "--no-psqlrc",
+        "--set",
+        "ON_ERROR_STOP=1",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        String(port),
+        "--dbname",
+        database,
+        "--file",
+        filePath,
+      ],
+      {
+        cwd: repoRoot,
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+    const stdout = [];
+    const stderr = [];
+
+    child.stdout.on("data", (chunk) => stdout.push(chunk));
+    child.stderr.on("data", (chunk) => stderr.push(chunk));
+    child.on("close", (status) => {
+      resolve({
+        output: Buffer.concat([...stdout, ...stderr]).toString("utf8"),
+        status,
+      });
+    });
+  });
+}
+
+function assertOneSuccessOneConflict(operationName, results) {
+  const successes = results.filter((result) => result.status === 0);
+  const failures = results.filter((result) => result.status !== 0);
+
+  if (successes.length !== 1 || failures.length !== 1) {
+    throw new Error(
+      `Expected one ${operationName} success and one conflict. Results:\n${results
+        .map((result) => `status=${result.status}\n${result.output}`)
+        .join("\n---\n")}`,
+    );
+  }
+
+  if (!failures[0].output.includes("m10_transfer_conflict")) {
+    throw new Error(
+      `Expected ${operationName} loser to fail with m10_transfer_conflict. Output:\n${failures[0].output}`,
+    );
+  }
+}
+
+async function runConcurrentSqlPair(
+  port,
+  database,
+  tempDir,
+  name,
+  firstSql,
+  secondSql,
+) {
+  const firstPath = path.join(tempDir, `${name}-a.sql`);
+  const secondPath = path.join(tempDir, `${name}-b.sql`);
+  fs.writeFileSync(firstPath, firstSql);
+  fs.writeFileSync(secondPath, secondSql);
+
+  const results = await Promise.all([
+    runPsqlFileAsync(port, database, firstPath),
+    runPsqlFileAsync(port, database, secondPath),
+  ]);
+
+  assertOneSuccessOneConflict(name, results);
+}
+
+async function runM10ConcurrentLifecycleChecks(port, database, tempDir) {
+  psql(
+    port,
+    database,
+    `
+create or replace function public.m10_runtime_assert_true(description text, condition boolean)
+returns void
+language plpgsql
+as $$
+begin
+  if not coalesce(condition, false) then
+    raise exception 'M10 runtime assertion failed: %', description;
+  end if;
+end;
+$$;
+
+create or replace function public.m10_runtime_assert_eq(description text, actual numeric, expected numeric)
+returns void
+language plpgsql
+as $$
+begin
+  if actual <> expected then
+    raise exception 'M10 runtime assertion failed: %, expected %, got %', description, expected, actual;
+  end if;
+end;
+$$;
+
+create or replace function public.m10_runtime_overlap_sleep()
+returns trigger
+language plpgsql
+as $$
+begin
+  perform pg_sleep(0.25);
+  return new;
+end;
+$$;
+
+drop trigger if exists m10_runtime_overlap_sleep on public.transfers;
+create trigger m10_runtime_overlap_sleep
+before update of status on public.transfers
+for each row
+when (
+  old.status = 'posted'
+  and new.status = 'reversed'
+  and old.description like 'Concurrent %'
+)
+execute function public.m10_runtime_overlap_sleep();
+`,
+    { name: "concurrent-overlap-trigger", tempDir },
+  );
+
+  try {
+    psql(
+      port,
+      database,
+      `
+set role authenticated;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-000000001991';
+
+select public.create_transfer(jsonb_build_object(
+  'amount', '21',
+  'description', 'Concurrent reverse original',
+  'source_account_id', '00000000-0000-4000-8000-000000001993',
+  'destination_account_id', '00000000-0000-4000-8000-000000001994',
+  'transfer_date', '2026-10-10'
+));
+`,
+      { name: "concurrent-reverse-setup", tempDir },
+    );
+
+    const reverseSql = `
+set role authenticated;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-000000001991';
+select public.reverse_transfer(
+  (select id from public.transfers where description = 'Concurrent reverse original'),
+  'concurrent reverse'
+);
+`;
+
+    await runConcurrentSqlPair(
+      port,
+      database,
+      tempDir,
+      "concurrent-reverse-reverse",
+      reverseSql,
+      reverseSql,
+    );
+
+    psql(
+      port,
+      database,
+      `
+do $$
+declare
+  v_transfer_id uuid;
+begin
+  select id
+  into v_transfer_id
+  from public.transfers
+  where description = 'Concurrent reverse original';
+
+  perform public.m10_runtime_assert_eq(
+    'reverse/reverse overlap creates exactly two reversal movement rows',
+    (
+      select count(*)::numeric
+      from public.transactions
+      where transfer_id = v_transfer_id
+        and reversal_of_transaction_id is not null
+    ),
+    2
+  );
+
+  perform public.m10_runtime_assert_eq(
+    'reverse/reverse overlap leaves original transfer reversed once',
+    (
+      select count(*)::numeric
+      from public.transfers
+      where id = v_transfer_id
+        and status = 'reversed'
+    ),
+    1
+  );
+end;
+$$;
+`,
+      { name: "concurrent-reverse-assert", tempDir },
+    );
+
+    psql(
+      port,
+      database,
+      `
+set role authenticated;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-000000001991';
+
+select public.create_transfer(jsonb_build_object(
+  'amount', '31',
+  'description', 'Concurrent correct original',
+  'source_account_id', '00000000-0000-4000-8000-000000001993',
+  'destination_account_id', '00000000-0000-4000-8000-000000001994',
+  'transfer_date', '2026-10-11'
+));
+`,
+      { name: "concurrent-correct-setup", tempDir },
+    );
+
+    const correctASql = `
+set role authenticated;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-000000001991';
+select public.correct_transfer(
+  (select id from public.transfers where description = 'Concurrent correct original'),
+  'concurrent correct a',
+  jsonb_build_object(
+    'amount', '32',
+    'description', 'Concurrent correct A replacement',
+    'source_account_id', '00000000-0000-4000-8000-000000001993',
+    'destination_account_id', '00000000-0000-4000-8000-000000001994',
+    'transfer_date', '2026-10-12'
+  )
+);
+`;
+    const correctBSql = `
+set role authenticated;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-000000001991';
+select public.correct_transfer(
+  (select id from public.transfers where description = 'Concurrent correct original'),
+  'concurrent correct b',
+  jsonb_build_object(
+    'amount', '33',
+    'description', 'Concurrent correct B replacement',
+    'source_account_id', '00000000-0000-4000-8000-000000001993',
+    'destination_account_id', '00000000-0000-4000-8000-000000001994',
+    'transfer_date', '2026-10-13'
+  )
+);
+`;
+
+    await runConcurrentSqlPair(
+      port,
+      database,
+      tempDir,
+      "concurrent-correct-correct",
+      correctASql,
+      correctBSql,
+    );
+
+    psql(
+      port,
+      database,
+      `
+do $$
+declare
+  v_transfer_id uuid;
+begin
+  select id
+  into v_transfer_id
+  from public.transfers
+  where description = 'Concurrent correct original';
+
+  perform public.m10_runtime_assert_eq(
+    'correct/correct overlap creates exactly two reversal movement rows',
+    (
+      select count(*)::numeric
+      from public.transactions
+      where transfer_id = v_transfer_id
+        and reversal_of_transaction_id is not null
+    ),
+    2
+  );
+
+  perform public.m10_runtime_assert_eq(
+    'correct/correct overlap posts exactly one replacement transfer',
+    (
+      select count(*)::numeric
+      from public.transfers
+      where description in ('Concurrent correct A replacement', 'Concurrent correct B replacement')
+        and status = 'posted'
+    ),
+    1
+  );
+end;
+$$;
+`,
+      { name: "concurrent-correct-assert", tempDir },
+    );
+
+    psql(
+      port,
+      database,
+      `
+set role authenticated;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-000000001991';
+
+select public.create_transfer(jsonb_build_object(
+  'amount', '41',
+  'description', 'Concurrent reverse correct original',
+  'source_account_id', '00000000-0000-4000-8000-000000001993',
+  'destination_account_id', '00000000-0000-4000-8000-000000001994',
+  'transfer_date', '2026-10-14'
+));
+`,
+      { name: "concurrent-reverse-correct-setup", tempDir },
+    );
+
+    const reverseVsCorrectSql = `
+set role authenticated;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-000000001991';
+select public.reverse_transfer(
+  (select id from public.transfers where description = 'Concurrent reverse correct original'),
+  'concurrent reverse correct reverse'
+);
+`;
+    const correctVsReverseSql = `
+set role authenticated;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-000000001991';
+select public.correct_transfer(
+  (select id from public.transfers where description = 'Concurrent reverse correct original'),
+  'concurrent reverse correct correction',
+  jsonb_build_object(
+    'amount', '42',
+    'description', 'Concurrent reverse correct replacement',
+    'source_account_id', '00000000-0000-4000-8000-000000001993',
+    'destination_account_id', '00000000-0000-4000-8000-000000001994',
+    'transfer_date', '2026-10-15'
+  )
+);
+`;
+
+    await runConcurrentSqlPair(
+      port,
+      database,
+      tempDir,
+      "concurrent-reverse-correct",
+      reverseVsCorrectSql,
+      correctVsReverseSql,
+    );
+
+    psql(
+      port,
+      database,
+      `
+do $$
+declare
+  v_transfer_id uuid;
+begin
+  select id
+  into v_transfer_id
+  from public.transfers
+  where description = 'Concurrent reverse correct original';
+
+  perform public.m10_runtime_assert_eq(
+    'reverse/correct overlap creates exactly two reversal movement rows',
+    (
+      select count(*)::numeric
+      from public.transactions
+      where transfer_id = v_transfer_id
+        and reversal_of_transaction_id is not null
+    ),
+    2
+  );
+
+  perform public.m10_runtime_assert_true(
+    'reverse/correct overlap creates zero or one correction replacement',
+    (
+      select count(*)
+      from public.transfers
+      where description = 'Concurrent reverse correct replacement'
+        and status = 'posted'
+    ) in (0, 1)
+  );
+end;
+$$;
+`,
+      { name: "concurrent-reverse-correct-assert", tempDir },
+    );
+  } finally {
+    psql(
+      port,
+      database,
+      `
+drop trigger if exists m10_runtime_overlap_sleep on public.transfers;
+drop function if exists public.m10_runtime_overlap_sleep();
+`,
+      { name: "concurrent-overlap-trigger-drop", tempDir },
+    );
+  }
+
+  console.log("M10 concurrency overlap probes passed.");
+}
+
+function runM10FaultInjectionChecks(port, database, tempDir) {
+  psql(
+    port,
+    database,
+    `
+create or replace function public.m10_runtime_fail_on_marker()
+returns trigger
+language plpgsql
+as $$
+begin
+  if tg_table_name = 'transactions' then
+    if new.description = 'Transfer in: Fault create rollback' then
+      raise exception 'm10_runtime_injected_failure: create mid-step';
+    end if;
+
+    if new.description = 'Reversal: Transfer in: Fault reverse rollback' then
+      raise exception 'm10_runtime_injected_failure: reverse mid-step';
+    end if;
+  end if;
+
+  if tg_table_name = 'transfers' and new.description = 'Fault correct replacement' then
+    raise exception 'm10_runtime_injected_failure: correct mid-step';
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists m10_runtime_fail_transactions on public.transactions;
+drop trigger if exists m10_runtime_fail_transfers on public.transfers;
+create trigger m10_runtime_fail_transactions
+before insert on public.transactions
+for each row
+execute function public.m10_runtime_fail_on_marker();
+create trigger m10_runtime_fail_transfers
+before insert on public.transfers
+for each row
+execute function public.m10_runtime_fail_on_marker();
+`,
+    { name: "fault-injection-triggers", tempDir },
+  );
+
+  try {
+    psql(
+      port,
+      database,
+      `
+set role authenticated;
+set request.jwt.claim.sub = '00000000-0000-4000-8000-000000001991';
+
+do $$
+declare
+  v_transfer_id uuid;
+begin
+  begin
+    perform public.create_transfer(jsonb_build_object(
+      'amount', '51',
+      'description', 'Fault create rollback',
+      'source_account_id', '00000000-0000-4000-8000-000000001993',
+      'destination_account_id', '00000000-0000-4000-8000-000000001994',
+      'transfer_date', '2026-10-16'
+    ));
+    raise exception 'create fault injection did not raise';
+  exception when others then
+    if sqlerrm not like '%m10_runtime_injected_failure: create mid-step%' then
+      raise;
+    end if;
+  end;
+
+  perform public.m10_runtime_assert_eq(
+    'create mid-step rollback leaves no transfer row',
+    (
+      select count(*)::numeric
+      from public.transfers
+      where description = 'Fault create rollback'
+    ),
+    0
+  );
+
+  perform public.m10_runtime_assert_eq(
+    'create mid-step rollback leaves no movement rows',
+    (
+      select count(*)::numeric
+      from public.transactions
+      where description in ('Transfer out: Fault create rollback', 'Transfer in: Fault create rollback')
+    ),
+    0
+  );
+
+  perform public.create_transfer(jsonb_build_object(
+    'amount', '61',
+    'description', 'Fault reverse rollback',
+    'source_account_id', '00000000-0000-4000-8000-000000001993',
+    'destination_account_id', '00000000-0000-4000-8000-000000001994',
+    'transfer_date', '2026-10-17'
+  ));
+
+  select id
+  into v_transfer_id
+  from public.transfers
+  where description = 'Fault reverse rollback';
+
+  begin
+    perform public.reverse_transfer(v_transfer_id, 'fault reverse rollback');
+    raise exception 'reverse fault injection did not raise';
+  exception when others then
+    if sqlerrm not like '%m10_runtime_injected_failure: reverse mid-step%' then
+      raise;
+    end if;
+  end;
+
+  perform public.m10_runtime_assert_eq(
+    'reverse mid-step rollback leaves original transfer posted',
+    (
+      select count(*)::numeric
+      from public.transfers
+      where id = v_transfer_id
+        and status = 'posted'
+    ),
+    1
+  );
+
+  perform public.m10_runtime_assert_eq(
+    'reverse mid-step rollback leaves original movement rows posted only',
+    (
+      select count(*)::numeric
+      from public.transactions
+      where transfer_id = v_transfer_id
+        and status = 'posted'
+        and reversal_of_transaction_id is null
+    ),
+    2
+  );
+
+  perform public.m10_runtime_assert_eq(
+    'reverse mid-step rollback leaves no reversal movement rows',
+    (
+      select count(*)::numeric
+      from public.transactions
+      where transfer_id = v_transfer_id
+        and reversal_of_transaction_id is not null
+    ),
+    0
+  );
+
+  perform public.create_transfer(jsonb_build_object(
+    'amount', '71',
+    'description', 'Fault correct original',
+    'source_account_id', '00000000-0000-4000-8000-000000001993',
+    'destination_account_id', '00000000-0000-4000-8000-000000001994',
+    'transfer_date', '2026-10-18'
+  ));
+
+  select id
+  into v_transfer_id
+  from public.transfers
+  where description = 'Fault correct original';
+
+  begin
+    perform public.correct_transfer(
+      v_transfer_id,
+      'fault correct rollback',
+      jsonb_build_object(
+        'amount', '72',
+        'description', 'Fault correct replacement',
+        'source_account_id', '00000000-0000-4000-8000-000000001993',
+        'destination_account_id', '00000000-0000-4000-8000-000000001994',
+        'transfer_date', '2026-10-19'
+      )
+    );
+    raise exception 'correct fault injection did not raise';
+  exception when others then
+    if sqlerrm not like '%m10_runtime_injected_failure: correct mid-step%' then
+      raise;
+    end if;
+  end;
+
+  perform public.m10_runtime_assert_eq(
+    'correct mid-step rollback leaves original transfer posted',
+    (
+      select count(*)::numeric
+      from public.transfers
+      where id = v_transfer_id
+        and status = 'posted'
+    ),
+    1
+  );
+
+  perform public.m10_runtime_assert_eq(
+    'correct mid-step rollback leaves no reversal movement rows',
+    (
+      select count(*)::numeric
+      from public.transactions
+      where transfer_id = v_transfer_id
+        and reversal_of_transaction_id is not null
+    ),
+    0
+  );
+
+  perform public.m10_runtime_assert_eq(
+    'correct mid-step rollback leaves no replacement transfer',
+    (
+      select count(*)::numeric
+      from public.transfers
+      where description = 'Fault correct replacement'
+    ),
+    0
+  );
+end;
+$$;
+`,
+      { name: "fault-injection-runtime", tempDir },
+    );
+  } finally {
+    psql(
+      port,
+      database,
+      `
+drop trigger if exists m10_runtime_fail_transactions on public.transactions;
+drop trigger if exists m10_runtime_fail_transfers on public.transfers;
+drop function if exists public.m10_runtime_fail_on_marker();
+`,
+      { name: "fault-injection-triggers-drop", tempDir },
+    );
+  }
+
+  console.log("M10 fault-injection rollback probes passed.");
 }
 
 const preludeSql = `
@@ -1039,6 +1674,8 @@ async function main() {
     }
     psqlFile(port, database, seedPath);
     psql(port, database, runtimeSql, { name: "runtime", tempDir });
+    await runM10ConcurrentLifecycleChecks(port, database, tempDir);
+    runM10FaultInjectionChecks(port, database, tempDir);
 
     console.log("M10 transfers runtime harness passed.");
   } finally {

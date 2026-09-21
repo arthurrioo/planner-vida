@@ -6,7 +6,9 @@
 - PR: #9, `Milestone 10 - Transfers`
 - Original HEAD: `f12a55d`
 - Original commits preserved: `e2280f1`, `4888670`, `f12a55d`
-- Remediation commits: recorded after this report is committed
+- Remediation commit: `764d75f` (`fix: remediate milestone 10 review findings`)
+- Final validation/report commit: this report update commit in Git history
+- Push status: `764d75f` was pushed to `origin/milestone-10-transfers`; final push status is confirmed in the handoff evidence after this report update is committed and pushed
 - Merge and squash: not performed
 
 ## 2. F1: M09 RPC guard hardening
@@ -30,9 +32,9 @@ Tests cover archived-source amount-only correction, closed-destination amount-on
 
 ## 5. F6: runtime harness
 
-`verify:runtime:m10:transfers` now covers ownership, exact two-leg linkage, same-account rejection, cross-user source/destination denial, forged-user handling, owner reassignment denial, anonymous and missing-subject denial, inactive create rejection, repeat reverse conflict, cross-user reverse/correct denial, hard-delete blocking, direct M09 RPC guards, audit behavior, and historical correction rules.
+`verify:runtime:m10:transfers` now covers ownership, exact two-leg linkage, same-account rejection, cross-user source/destination denial, forged-user handling, owner reassignment denial, anonymous and missing-subject denial, inactive create rejection, repeat reverse conflict, cross-user reverse/correct denial, hard-delete blocking, direct M09 RPC guards, audit behavior, historical correction rules, barrier-assisted concurrent lifecycle races, and explicit mid-step rollback probes.
 
-The harness applies the remediation migration in a disposable PostgreSQL database and verifies rollback for invalid correction/replacement paths. The requested dedicated fault-injection and barrier-coordinated concurrency scenarios remain a follow-up harness expansion; they were not claimed as executed evidence in this report.
+The harness applies the remediation migration in a disposable PostgreSQL database and verifies rollback for invalid correction/replacement paths and injected mid-step failures. The concurrency probes use parallel `psql` clients plus a disposable `pg_sleep` trigger on transfer status reversal to force real overlap while preserving a one-winner/one-conflict contract.
 
 ## 6. F7: unit, component, and integration coverage
 
@@ -50,19 +52,26 @@ The runtime and integration tests verify two posted linked legs per transfer, bo
 
 ## 9. Concurrency and fault-injection evidence
 
-No dedicated barrier-coordinated concurrency result is claimed. The existing RPC locking and conflict paths remain covered by the ordinary runtime cases, but reverse-vs-reverse, correct-vs-correct, reverse-vs-correct, and explicit mid-step injected-failure overlap tests require a later disposable-PG harness expansion before a full independent re-review.
+Executed in `npm run verify:runtime:m10:transfers` against disposable local PostgreSQL:
+
+- `reverse_transfer` vs `reverse_transfer`: two parallel clients target the same posted transfer; exactly one succeeds, exactly one receives `m10_transfer_conflict`, the original transfer is reversed once, and exactly two reversal movement rows exist.
+- `correct_transfer` vs `correct_transfer`: two parallel clients target the same posted transfer with different replacements; exactly one succeeds, exactly one receives `m10_transfer_conflict`, the original has exactly two reversal movement rows, and exactly one replacement transfer is posted.
+- `reverse_transfer` vs `correct_transfer`: parallel clients target the same posted transfer; exactly one succeeds, exactly one receives `m10_transfer_conflict`, exactly two reversal movement rows exist, and the correction replacement count is constrained to zero or one depending on the winning operation.
+- `create_transfer` mid-step rollback: a disposable trigger fails the second movement insert; the transfer row and both movement rows are absent after rollback.
+- `reverse_transfer` mid-step rollback: a disposable trigger fails the second reversal movement insert; the original transfer remains posted, the original two movement rows remain posted, and no reversal rows survive.
+- `correct_transfer` mid-step rollback: a disposable trigger fails after the original reversal path and before replacement persistence; the original transfer remains posted, no reversal rows survive, and no replacement transfer survives.
 
 ## 10. Ownership and RLS matrix
 
-| Case | Expected result | Covered |
-| --- | --- | --- |
-| Owner creates/reads/reverses/corrects own transfer | Allowed | Service and M10 runtime |
-| Cross-user source or destination | Denied | M10 runtime |
-| Forged `user_id` payload | Server identity wins/denied | M10 runtime |
-| Owner reassignment | Denied | M10 runtime |
-| Anonymous RPC call | Denied | M10 runtime and grants |
-| Authenticated role without `sub` | Denied | M10 runtime |
-| Direct M09 lifecycle on transfer leg | Conflict/denied | Service, migration, runtime |
+| Case                                               | Expected result             | Covered                     |
+| -------------------------------------------------- | --------------------------- | --------------------------- |
+| Owner creates/reads/reverses/corrects own transfer | Allowed                     | Service and M10 runtime     |
+| Cross-user source or destination                   | Denied                      | M10 runtime                 |
+| Forged `user_id` payload                           | Server identity wins/denied | M10 runtime                 |
+| Owner reassignment                                 | Denied                      | M10 runtime                 |
+| Anonymous RPC call                                 | Denied                      | M10 runtime and grants      |
+| Authenticated role without `sub`                   | Denied                      | M10 runtime                 |
+| Direct M09 lifecycle on transfer leg               | Conflict/denied             | Service, migration, runtime |
 
 ## 11. Audit minimization
 
@@ -91,14 +100,19 @@ Passed in this remediation session:
 - `npm run build`
 - `npm run verify:schema:m03`
 - `npm run verify:runtime:m03:pg` — passed outside the sandbox in a disposable PostgreSQL process
-- `npm run verify:runtime:m10:transfers` — passed outside the sandbox in a disposable PostgreSQL process
+- `npm run verify:runtime:m04:auth` — passed outside the sandbox in disposable PostgreSQL, 2 clean reset cycles
+- `npm run verify:runtime:m07:accounts` — passed outside the sandbox in disposable PostgreSQL
+- `npm run verify:runtime:m08:categories` — passed outside the sandbox in disposable PostgreSQL
+- `npm run verify:runtime:m09:transactions` — passed outside the sandbox in disposable PostgreSQL, including M09 concurrent reversal check
+- `npm run verify:runtime:m10:transfers` — passed outside the sandbox in disposable PostgreSQL, including M10 concurrency and fault-injection probes
+- `npm run test:e2e` — 14 passed outside the sandbox after sandbox port binding was denied
 - `git diff --check`
 
-Not executed to completion in this session:
+Environment notes:
 
-- M04, M07, M08, and M09 PostgreSQL runtime harnesses: sandbox shared-memory restrictions required elevation, and the elevation request was rejected by the host usage-limit reviewer before execution.
-- `npm run test:e2e`: Playwright web server could not bind `0.0.0.0:3000` because the sandbox returned `EPERM`.
-- Dedicated barrier-coordinated concurrency and explicit mid-step fault-injection probes described in F6.
+- The first sandbox run of M04 failed at PostgreSQL shared memory creation (`shmget ... Operation not permitted`); the rerun outside the sandbox passed against local disposable PostgreSQL.
+- The first sandbox run of E2E failed to bind `0.0.0.0:3000` with `EPERM`; the rerun outside the sandbox passed.
+- No hosted Supabase/GoTrue or production database was touched.
 
 ## 14. Frozen-surface boundary
 
@@ -106,6 +120,6 @@ No frozen planning/architecture/specification documents, `Markdown Files/`, M11+
 
 ## 15. Remaining risks and recommendation
 
-The implementation and focused M10 evidence cover the requested F1-F7 behavioral fixes, with F10/F11 hardening included. The remaining unexecuted regression and concurrency gates are environment/evidence limitations, not silently treated as passes. Independent milestone re-review should run those gates in an environment that permits disposable PostgreSQL shared memory and Playwright port binding.
+The implementation and focused M10 evidence cover the requested F1-F7 behavioral fixes, with F10/F11 hardening included. The previously missing M04/M07/M08/M09 runtime, E2E, and M10 concurrency/fault-injection gates have now been executed and passed locally against disposable runtime targets. Remaining limitation: hosted Supabase/GoTrue was not exercised.
 
-NOT READY FOR INDEPENDENT MILESTONE 10 RE-REVIEW
+READY FOR INDEPENDENT MILESTONE 10 RE-REVIEW
