@@ -60,8 +60,9 @@ Branch: `milestone-11-statement-filters-balance-invariants`
 Commits:
 
 - `76dae6e` - `feat: implement milestone 11 statement`
+- `1f3088c` - `docs: add milestone 11 implementation report`
 
-Pull Request: pending at initial report creation; will be updated after PR creation.
+Pull Request: https://github.com/arthurrioo/planner-vida/pull/10
 
 ## 3. Files Changed
 
