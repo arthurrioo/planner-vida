@@ -71,6 +71,8 @@ export type TransactionSearch = Readonly<{
   creditCardId?: CreditCardId;
   dateFrom?: LocalDate;
   dateTo?: LocalDate;
+  limit?: number;
+  offset?: number;
   paymentMethod?: PaymentMethod;
   query?: string;
   status?: TransactionStatus;
