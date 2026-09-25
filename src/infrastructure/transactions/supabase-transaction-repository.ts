@@ -95,7 +95,8 @@ export class SupabaseTransactionRepository implements TransactionRepository {
       .select(transactionColumns)
       .eq("user_id", context.userId)
       .order("transaction_date", { ascending: false })
-      .order("created_at", { ascending: false });
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: false });
 
     if (search.accountId) {
       query = query.eq("account_id", search.accountId);

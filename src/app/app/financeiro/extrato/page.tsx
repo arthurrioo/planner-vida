@@ -10,10 +10,12 @@ import { Field, Input } from "@/components/ui/form";
 import { ResponsiveTable } from "@/components/ui/responsive-table";
 import {
   asUserId,
+  DomainError,
   getEnumLabel,
   getEnumOptions,
   parseLocalDate,
 } from "@/domain/shared";
+import type { StatementResult } from "@/domain/statements";
 import {
   isPaymentMethod,
   isTransactionStatus,
@@ -35,10 +37,25 @@ export default async function StatementPage({ searchParams }: PageProps) {
   const path = "/app/financeiro/extrato";
   const { user } = await getAuthenticatedSession(path);
   const service = await createStatementService();
-  const statement = await service.getStatement(
-    { userId: asUserId(user.id) },
-    statementQueryFromParams(params),
-  );
+  const query = statementQueryFromParams(params);
+  let validationError: string | null = null;
+  let statement: StatementResult;
+
+  try {
+    statement = await service.getStatement(
+      { userId: asUserId(user.id) },
+      query,
+    );
+  } catch (error) {
+    if (!isStatementValidationError(error)) {
+      throw error;
+    }
+
+    validationError =
+      "Revise o periodo informado: a data inicial deve ser anterior ou igual a data final.";
+    statement = emptyStatementResult(query);
+  }
+
   const rows = statement.entries.map((entry) => ({
     account: entry.accountName ?? entry.creditCardName ?? "Sem conta/cartao",
     amount: formatBRL(entry.transaction.amount.amount),
@@ -245,6 +262,14 @@ export default async function StatementPage({ searchParams }: PageProps) {
                 </Link>
               </div>
             </form>
+            {validationError ? (
+              <p
+                className="border-danger/35 bg-danger-muted text-danger mt-4 rounded-md border p-3 text-sm font-medium"
+                role="alert"
+              >
+                {validationError}
+              </p>
+            ) : null}
           </CardContent>
         </Card>
 
@@ -304,6 +329,45 @@ export default async function StatementPage({ searchParams }: PageProps) {
       </ModulePage>
     </ProtectedAppShell>
   );
+}
+
+function isStatementValidationError(error: unknown): error is DomainError {
+  return error instanceof DomainError && error.code === "VALIDATION_FAILED";
+}
+
+function emptyStatementResult(query: StatementQueryInput): StatementResult {
+  const page = positiveInteger(readQueryValue(query.page), 1);
+  const pageSize = Math.min(
+    positiveInteger(readQueryValue(query.pageSize), 25),
+    100,
+  );
+
+  return {
+    accountBalances: [],
+    entries: [],
+    filters: {},
+    hasNextPage: false,
+    hasPreviousPage: page > 1,
+    options: { accounts: [], categories: [], creditCards: [] },
+    page,
+    pageSize,
+  };
+}
+
+function readQueryValue(value: unknown) {
+  return typeof value === "string" || typeof value === "number"
+    ? value
+    : undefined;
+}
+
+function positiveInteger(value: string | number | undefined, fallback: number) {
+  if (value === undefined) {
+    return fallback;
+  }
+
+  const parsed = Number(value);
+
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
 function statementQueryFromParams(

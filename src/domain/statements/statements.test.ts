@@ -129,6 +129,60 @@ describe("StatementService", () => {
     expect(pageTwo.hasPreviousPage).toBe(true);
   });
 
+  it("keeps tied transaction date and created_at rows stable across pages with id as the final tie-breaker", async () => {
+    const tiedCreatedAt = "2026-09-20T10:00:00.000Z";
+    const records = [
+      transaction({
+        createdAt: tiedCreatedAt,
+        description: "Tie 001",
+        id: asTransactionId("00000000-0000-4000-8000-000000020001"),
+        transactionDate: "2026-09-20",
+      }),
+      transaction({
+        createdAt: tiedCreatedAt,
+        description: "Tie 004",
+        id: asTransactionId("00000000-0000-4000-8000-000000020004"),
+        transactionDate: "2026-09-20",
+      }),
+      transaction({
+        createdAt: tiedCreatedAt,
+        description: "Tie 002",
+        id: asTransactionId("00000000-0000-4000-8000-000000020002"),
+        transactionDate: "2026-09-20",
+      }),
+      transaction({
+        createdAt: tiedCreatedAt,
+        description: "Tie 003",
+        id: asTransactionId("00000000-0000-4000-8000-000000020003"),
+        transactionDate: "2026-09-20",
+      }),
+    ];
+    const service = createStatementService(records);
+    const full = await service.getStatement(contextA, { pageSize: "10" });
+    const pageOne = await service.getStatement(contextA, {
+      page: "1",
+      pageSize: "2",
+    });
+    const pageTwo = await service.getStatement(contextA, {
+      page: "2",
+      pageSize: "2",
+    });
+    const paginatedIds = [...pageOne.entries, ...pageTwo.entries].map(
+      (entry) => entry.transaction.id,
+    );
+
+    expect(full.entries.map((entry) => entry.transaction.description)).toEqual([
+      "Tie 004",
+      "Tie 003",
+      "Tie 002",
+      "Tie 001",
+    ]);
+    expect(new Set(paginatedIds).size).toBe(records.length);
+    expect(paginatedIds).toEqual(
+      full.entries.map((entry) => entry.transaction.id),
+    );
+  });
+
   it("routes transfer entries to transfer lifecycle and card entries to transaction lifecycle", async () => {
     const service = createStatementService([
       transaction({
@@ -149,13 +203,19 @@ describe("StatementService", () => {
     ]);
 
     const result = await service.getStatement(contextA);
+    const transferEntry = result.entries.find(
+      (entry) => entry.transaction.transactionType === "transfer",
+    );
+    const cardEntry = result.entries.find(
+      (entry) => entry.transaction.creditCardId === cardA,
+    );
 
-    expect(result.entries[0]?.detailPath).toBe(
+    expect(transferEntry?.detailPath).toBe(
       `/app/financeiro/transferencias/${transferA}`,
     );
-    expect(result.entries[1]?.creditCardName).toBe("Cartao Azul");
-    expect(result.entries[1]?.detailPath).toBe(
-      `/app/financeiro/transacoes/${result.entries[1]?.transaction.id}`,
+    expect(cardEntry?.creditCardName).toBe("Cartao Azul");
+    expect(cardEntry?.detailPath).toBe(
+      `/app/financeiro/transacoes/${cardEntry?.transaction.id}`,
     );
   });
 
@@ -261,14 +321,23 @@ class InMemoryStatementTransactionRepository {
           ? record.transactionType === search.transactionType
           : true,
       )
-      .sort((left, right) =>
-        right.transactionDate.localeCompare(left.transactionDate),
-      );
+      .sort(compareStatementRecords);
     const offset = search.offset ?? 0;
     const limit = search.limit ?? filtered.length;
 
     return filtered.slice(offset, offset + limit);
   }
+}
+
+function compareStatementRecords(
+  left: TransactionRecord,
+  right: TransactionRecord,
+) {
+  return (
+    right.transactionDate.localeCompare(left.transactionDate) ||
+    (right.createdAt ?? "").localeCompare(left.createdAt ?? "") ||
+    right.id.localeCompare(left.id)
+  );
 }
 
 class InMemoryStatementReferenceRepository {
