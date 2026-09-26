@@ -69,6 +69,24 @@ export default function FinanceiroPage() {
 
           <Card>
             <CardHeader>
+              <CardTitle>Extrato</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-muted-foreground mb-4 text-sm leading-6">
+                Revise o historico financeiro realizado com filtros, contexto de
+                conta/cartao e saldos calculados.
+              </p>
+              <Link
+                className="bg-primary text-primary-foreground hover:bg-primary/90 inline-flex h-10 items-center justify-center rounded-md px-4 text-sm font-medium"
+                href="/app/financeiro/extrato"
+              >
+                Abrir extrato
+              </Link>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
               <CardTitle>Transferencias</CardTitle>
             </CardHeader>
             <CardContent>

@@ -95,7 +95,8 @@ export class SupabaseTransactionRepository implements TransactionRepository {
       .select(transactionColumns)
       .eq("user_id", context.userId)
       .order("transaction_date", { ascending: false })
-      .order("created_at", { ascending: false });
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: false });
 
     if (search.accountId) {
       query = query.eq("account_id", search.accountId);
@@ -135,7 +136,11 @@ export class SupabaseTransactionRepository implements TransactionRepository {
       query = query.ilike("description", `%${search.query.trim()}%`);
     }
 
-    const { data, error } = await query.limit(200);
+    const limit = Math.min(Math.max(search.limit ?? 200, 1), 201);
+    const { data, error } =
+      search.offset !== undefined
+        ? await query.range(search.offset, search.offset + limit - 1)
+        : await query.limit(limit);
 
     if (error) {
       throw mapSupabaseError(error);
