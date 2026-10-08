@@ -23,6 +23,8 @@
     "verify:runtime:m09:transactions": "node scripts/run-m09-transactions-runtime-harness.mjs",
     "verify:runtime:m10:transfers": "node scripts/run-m10-transfers-runtime-harness.mjs",
     "verify:runtime:m11:statement": "node scripts/run-m11-statement-runtime-harness.mjs",
+    "verify:runtime:m12:installments": "node scripts/run-m12-installments-runtime-harness.mjs",
+    "verify:schema:m12": "node scripts/verify-m12-installments.mjs",
     "check:secrets": "node scripts/check-secrets.mjs",
     "typecheck": "tsc --project tsconfig.json --noEmit",
     "test": "vitest run",
