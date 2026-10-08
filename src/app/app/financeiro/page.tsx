@@ -102,6 +102,24 @@ export default function FinanceiroPage() {
               </Link>
             </CardContent>
           </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Parcelamentos</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-muted-foreground mb-4 text-sm leading-6">
+                Acompanhe compras parceladas, compromissos futuros e realizacoes
+                sem transacao pai ou dupla contagem.
+              </p>
+              <Link
+                className="bg-primary text-primary-foreground hover:bg-primary/90 inline-flex h-10 items-center justify-center rounded-md px-4 text-sm font-medium"
+                href="/app/financeiro/parcelamentos"
+              >
+                Abrir parcelamentos
+              </Link>
+            </CardContent>
+          </Card>
         </div>
       </ModulePage>
     </ProtectedAppShell>
